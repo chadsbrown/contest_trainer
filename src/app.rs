@@ -243,8 +243,19 @@ impl ContestApp {
         }
 
         if let ContestState::StationsCalling { ref callers } = self.state {
-            // Find the caller (take first one for simplicity)
-            if let Some(caller) = callers.first().cloned() {
+            // Find the caller that matches what the user entered
+            // First try exact match, then partial match
+            let caller = callers
+                .iter()
+                .find(|c| c.params.callsign == entered_call)
+                .or_else(|| {
+                    callers
+                        .iter()
+                        .find(|c| c.params.callsign.contains(&entered_call))
+                })
+                .cloned();
+
+            if let Some(caller) = caller {
                 // Send our exchange to them
                 self.send_exchange(&entered_call);
 
@@ -447,15 +458,25 @@ impl ContestApp {
                 }
             }
 
-            // F2 - Send Exchange
+            // F2 - Send Exchange (uses callsign from input field if available)
             if i.key_pressed(Key::F2) {
-                let callsign = if let ContestState::StationsCalling { ref callers } = self.state {
-                    callers.first().map(|c| c.params.callsign.clone())
-                } else {
-                    None
-                };
-                if let Some(call) = callsign {
-                    self.send_exchange(&call);
+                if let ContestState::StationsCalling { ref callers } = self.state {
+                    let entered_call = self.callsign_input.trim().to_uppercase();
+                    // Use entered callsign if it matches a caller, otherwise use first caller
+                    let callsign = if !entered_call.is_empty() {
+                        callers
+                            .iter()
+                            .find(|c| {
+                                c.params.callsign == entered_call
+                                    || c.params.callsign.contains(&entered_call)
+                            })
+                            .map(|c| c.params.callsign.clone())
+                    } else {
+                        callers.first().map(|c| c.params.callsign.clone())
+                    };
+                    if let Some(call) = callsign {
+                        self.send_exchange(&call);
+                    }
                 }
             }
 
