@@ -111,7 +111,7 @@ pub struct ContestApp {
 
 impl ContestApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let settings = AppSettings::default();
+        let settings = AppSettings::load_or_default();
 
         // Create channels for audio communication
         let (cmd_tx, cmd_rx) = bounded::<AudioCommand>(64);
@@ -517,6 +517,11 @@ impl ContestApp {
             let _ = self
                 .cmd_tx
                 .send(AudioCommand::UpdateSettings(self.settings.audio.clone()));
+
+            // Save settings to file
+            if let Err(e) = self.settings.save() {
+                eprintln!("Failed to save settings: {}", e);
+            }
 
             self.settings_changed = false;
         }

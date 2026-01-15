@@ -101,15 +101,47 @@ impl Default for SimulationSettings {
 }
 
 impl AppSettings {
-    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Get the default config file path
+    pub fn config_path() -> std::path::PathBuf {
+        if let Some(config_dir) = dirs::config_dir() {
+            config_dir.join("contest_trainer").join("settings.toml")
+        } else {
+            std::path::PathBuf::from("settings.toml")
+        }
+    }
+
+    /// Load settings from the default config path, or return defaults if not found
+    pub fn load_or_default() -> Self {
+        let path = Self::config_path();
+        match Self::load(&path) {
+            Ok(settings) => {
+                eprintln!("Loaded settings from {}", path.display());
+                settings
+            }
+            Err(_) => {
+                eprintln!("Using default settings (no config at {})", path.display());
+                Self::default()
+            }
+        }
+    }
+
+    pub fn load(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let settings: Self = toml::from_str(&content)?;
         Ok(settings)
     }
 
-    pub fn save(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let path = Self::config_path();
+
+        // Create parent directory if needed
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
         let content = toml::to_string_pretty(self)?;
-        std::fs::write(path, content)?;
+        std::fs::write(&path, content)?;
+        eprintln!("Saved settings to {}", path.display());
         Ok(())
     }
 }
