@@ -194,13 +194,13 @@ impl ContestApp {
     }
 
     fn send_partial_query(&mut self, partial: &str) {
-        // Send partial callsign with "AGN" to request repeat
-        let message = format!("{} AGN", partial);
+        // Send just the partial callsign (his call)
         let wpm = self.settings.user.wpm;
 
-        let _ = self
-            .cmd_tx
-            .send(AudioCommand::PlayUserMessage { message, wpm });
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
+            message: partial.to_string(),
+            wpm,
+        });
     }
 
     fn handle_partial_query(&mut self) {

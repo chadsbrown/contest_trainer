@@ -130,7 +130,7 @@ fn render_key_hints(ui: &mut egui::Ui) {
         ui.add_space(10.0);
 
         ui.label(RichText::new("F5").strong().monospace());
-        ui.label("AGN?");
+        ui.label("His Call");
         ui.add_space(10.0);
 
         ui.label(RichText::new("Enter").strong().monospace());
