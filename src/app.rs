@@ -157,7 +157,7 @@ impl ContestApp {
     }
 
     fn send_cq(&mut self) {
-        let message = format!("CQ TEST {} TEST", self.settings.user.callsign);
+        let message = format!("CQ TEST {}", self.settings.user.callsign);
         let wpm = self.settings.user.wpm;
 
         let _ = self
