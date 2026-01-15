@@ -27,6 +27,11 @@ pub enum ContestState {
     WaitingForCallers,
     /// Station(s) are calling
     StationsCalling { callers: Vec<ActiveCaller> },
+    /// User sent partial callsign query, waiting for matching station to repeat
+    QueryingPartial {
+        callers: Vec<ActiveCaller>,
+        partial: String,
+    },
     /// User entered callsign, we're sending their exchange
     SendingExchange { caller: ActiveCaller },
     /// Station is sending their exchange
@@ -97,7 +102,7 @@ pub struct ContestApp {
     user_serial: u32,
 
     // UI state
-    show_settings: bool,
+    pub show_settings: bool,
     settings_changed: bool,
 
     // Timing for caller spawning
@@ -188,6 +193,49 @@ impl ContestApp {
             .send(AudioCommand::PlayUserMessage { message, wpm });
     }
 
+    fn send_partial_query(&mut self, partial: &str) {
+        // Send partial callsign with "AGN" to request repeat
+        let message = format!("{} AGN", partial);
+        let wpm = (self.settings.simulation.wpm_min + self.settings.simulation.wpm_max) / 2;
+
+        let _ = self
+            .cmd_tx
+            .send(AudioCommand::PlayUserMessage { message, wpm });
+    }
+
+    fn handle_partial_query(&mut self) {
+        let partial = self.callsign_input.trim().to_uppercase();
+        if partial.is_empty() {
+            return;
+        }
+
+        // Only works when stations are calling
+        let callers = match &self.state {
+            ContestState::StationsCalling { callers } => callers.clone(),
+            _ => return,
+        };
+
+        // Find callers that match the partial (case-insensitive substring match)
+        let matching: Vec<ActiveCaller> = callers
+            .into_iter()
+            .filter(|c| c.params.callsign.contains(&partial))
+            .collect();
+
+        if matching.is_empty() {
+            // No match - could send "AGN" anyway, but for now just ignore
+            return;
+        }
+
+        // Send the partial query
+        self.send_partial_query(&partial);
+
+        // Transition to QueryingPartial state
+        self.state = ContestState::QueryingPartial {
+            callers: matching,
+            partial,
+        };
+    }
+
     fn handle_callsign_submit(&mut self) {
         let entered_call = self.callsign_input.trim().to_uppercase();
         if entered_call.is_empty() {
@@ -273,17 +321,16 @@ impl ContestApp {
                             self.last_cq_finished = Some(Instant::now());
                         }
                         ContestState::SendingExchange { caller } => {
-                            // Our exchange sent, now station sends theirs
+                            // Our exchange sent, now station sends just their exchange
                             let caller = caller.clone();
 
-                            // Have the station send their exchange
+                            // Have the station send only their exchange (not callsign again)
                             let exchange_str =
                                 self.contest.format_sent_exchange(&caller.params.exchange);
-                            let message = format!("{} {}", caller.params.callsign, exchange_str);
 
                             let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
                                 id: caller.params.id,
-                                callsign: message,
+                                callsign: exchange_str,
                                 exchange: caller.params.exchange.clone(),
                                 frequency_offset_hz: caller.params.frequency_offset_hz,
                                 wpm: caller.params.wpm,
@@ -295,6 +342,29 @@ impl ContestApp {
                         ContestState::QsoComplete { .. } => {
                             // TU finished - maybe a tail-ender jumps in
                             self.try_spawn_tail_ender();
+                        }
+                        ContestState::QueryingPartial {
+                            callers,
+                            partial: _,
+                        } => {
+                            // Partial query sent, matching station(s) repeat their callsign
+                            let callers = callers.clone();
+
+                            for caller in &callers {
+                                // Station repeats just their callsign
+                                let _ =
+                                    self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                                        id: caller.params.id,
+                                        callsign: caller.params.callsign.clone(),
+                                        exchange: caller.params.exchange.clone(),
+                                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                                        wpm: caller.params.wpm,
+                                        amplitude: caller.params.amplitude,
+                                    }));
+                            }
+
+                            // Go back to StationsCalling with only the matching callers
+                            self.state = ContestState::StationsCalling { callers };
                         }
                         _ => {}
                     }
@@ -392,6 +462,11 @@ impl ContestApp {
             // F3 - Send TU
             if i.key_pressed(Key::F3) {
                 self.send_tu();
+            }
+
+            // F5 - Query partial callsign (send what user typed + "AGN")
+            if i.key_pressed(Key::F5) {
+                self.handle_partial_query();
             }
 
             // Enter - Submit current field

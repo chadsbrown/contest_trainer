@@ -57,6 +57,7 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
         ContestState::StationsCalling { .. } => {
             ("Station calling - enter callsign", Color32::GREEN)
         }
+        ContestState::QueryingPartial { .. } => ("Querying partial...", Color32::YELLOW),
         ContestState::SendingExchange { .. } => ("Sending exchange...", Color32::YELLOW),
         ContestState::ReceivingExchange { .. } => {
             ("Receiving exchange - type what you copy", Color32::GREEN)
@@ -83,7 +84,7 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
                 .hint_text("callsign"),
         );
 
-        if app.current_field == InputField::Callsign {
+        if app.current_field == InputField::Callsign && !app.show_settings {
             call_response.request_focus();
         }
 
@@ -97,7 +98,7 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
                 .hint_text("exchange"),
         );
 
-        if app.current_field == InputField::Exchange {
+        if app.current_field == InputField::Exchange && !app.show_settings {
             exch_response.request_focus();
         }
     });
@@ -128,6 +129,10 @@ fn render_key_hints(ui: &mut egui::Ui) {
         ui.label("TU");
         ui.add_space(10.0);
 
+        ui.label(RichText::new("F5").strong().monospace());
+        ui.label("AGN?");
+        ui.add_space(10.0);
+
         ui.label(RichText::new("Enter").strong().monospace());
         ui.label("Submit");
         ui.add_space(10.0);
@@ -149,7 +154,7 @@ fn render_last_qso(ui: &mut egui::Ui, result: &crate::app::QsoResult) {
         "✓"
     } else {
         "✗"
-};
+    };
 
     let call_color = if result.callsign_correct {
         Color32::GREEN
@@ -160,7 +165,7 @@ fn render_last_qso(ui: &mut egui::Ui, result: &crate::app::QsoResult) {
         Color32::GREEN
     } else {
         Color32::RED
-};
+    };
 
     ui.horizontal(|ui| {
         ui.label("Last QSO:");
