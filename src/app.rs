@@ -158,7 +158,7 @@ impl ContestApp {
 
     fn send_cq(&mut self) {
         let message = format!("CQ TEST {} TEST", self.settings.user.callsign);
-        let wpm = (self.settings.simulation.wpm_min + self.settings.simulation.wpm_max) / 2;
+        let wpm = self.settings.user.wpm;
 
         let _ = self
             .cmd_tx
@@ -177,7 +177,7 @@ impl ContestApp {
         );
 
         let message = format!("{} {}", their_call, exchange);
-        let wpm = (self.settings.simulation.wpm_min + self.settings.simulation.wpm_max) / 2;
+        let wpm = self.settings.user.wpm;
 
         let _ = self
             .cmd_tx
@@ -186,7 +186,7 @@ impl ContestApp {
 
     fn send_tu(&mut self) {
         let message = format!("TU {}", self.settings.user.callsign);
-        let wpm = (self.settings.simulation.wpm_min + self.settings.simulation.wpm_max) / 2;
+        let wpm = self.settings.user.wpm;
 
         let _ = self
             .cmd_tx
@@ -196,7 +196,7 @@ impl ContestApp {
     fn send_partial_query(&mut self, partial: &str) {
         // Send partial callsign with "AGN" to request repeat
         let message = format!("{} AGN", partial);
-        let wpm = (self.settings.simulation.wpm_min + self.settings.simulation.wpm_max) / 2;
+        let wpm = self.settings.user.wpm;
 
         let _ = self
             .cmd_tx
@@ -562,9 +562,12 @@ impl eframe::App for ContestApp {
             egui::SidePanel::right("settings_panel")
                 .min_width(300.0)
                 .show(ctx, |ui| {
-                    ui.heading("Settings");
-                    ui.separator();
-                    render_settings_panel(ui, &mut self.settings, &mut self.settings_changed);
+                    render_settings_panel(
+                        ui,
+                        &mut self.settings,
+                        &mut self.settings_changed,
+                        &mut self.show_settings,
+                    );
                 });
         }
 

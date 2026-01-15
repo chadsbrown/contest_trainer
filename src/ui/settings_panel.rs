@@ -1,8 +1,22 @@
-use egui::RichText;
 use crate::config::AppSettings;
 use crate::contest::ContestType;
+use egui::RichText;
 
-pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, settings_changed: &mut bool) {
+pub fn render_settings_panel(
+    ui: &mut egui::Ui,
+    settings: &mut AppSettings,
+    settings_changed: &mut bool,
+    show_settings: &mut bool,
+) {
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button("Close").clicked() {
+                *show_settings = false;
+            }
+        });
+    });
+    ui.separator();
+
     egui::ScrollArea::vertical().show(ui, |ui| {
         // User Settings
         egui::CollapsingHeader::new(RichText::new("User Settings").strong())
@@ -10,7 +24,10 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Your Callsign:");
-                    if ui.text_edit_singleline(&mut settings.user.callsign).changed() {
+                    if ui
+                        .text_edit_singleline(&mut settings.user.callsign)
+                        .changed()
+                    {
                         settings.user.callsign = settings.user.callsign.to_uppercase();
                         *settings_changed = true;
                     }
@@ -26,15 +43,31 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
 
                 ui.horizontal(|ui| {
                     ui.label("CQ Zone:");
-                    if ui.add(egui::DragValue::new(&mut settings.user.zone).range(1..=40)).changed() {
+                    if ui
+                        .add(egui::DragValue::new(&mut settings.user.zone).range(1..=40))
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
 
                 ui.horizontal(|ui| {
                     ui.label("Section:");
-                    if ui.text_edit_singleline(&mut settings.user.section).changed() {
+                    if ui
+                        .text_edit_singleline(&mut settings.user.section)
+                        .changed()
+                    {
                         settings.user.section = settings.user.section.to_uppercase();
+                        *settings_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Your WPM:");
+                    if ui
+                        .add(egui::Slider::new(&mut settings.user.wpm, 15..=50))
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
@@ -51,25 +84,34 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
                     egui::ComboBox::from_id_salt("contest_type")
                         .selected_text(format!("{:?}", settings.contest.contest_type))
                         .show_ui(ui, |ui| {
-                            if ui.selectable_value(
-                                &mut settings.contest.contest_type,
-                                ContestType::CqWw,
-                                "CQ World Wide",
-                            ).changed() {
+                            if ui
+                                .selectable_value(
+                                    &mut settings.contest.contest_type,
+                                    ContestType::CqWw,
+                                    "CQ World Wide",
+                                )
+                                .changed()
+                            {
                                 *settings_changed = true;
                             }
-                            if ui.selectable_value(
-                                &mut settings.contest.contest_type,
-                                ContestType::NaSprint,
-                                "NA Sprint",
-                            ).changed() {
+                            if ui
+                                .selectable_value(
+                                    &mut settings.contest.contest_type,
+                                    ContestType::NaSprint,
+                                    "NA Sprint",
+                                )
+                                .changed()
+                            {
                                 *settings_changed = true;
                             }
-                            if ui.selectable_value(
-                                &mut settings.contest.contest_type,
-                                ContestType::Sweepstakes,
-                                "ARRL Sweepstakes",
-                            ).changed() {
+                            if ui
+                                .selectable_value(
+                                    &mut settings.contest.contest_type,
+                                    ContestType::Sweepstakes,
+                                    "ARRL Sweepstakes",
+                                )
+                                .changed()
+                            {
                                 *settings_changed = true;
                             }
                         });
@@ -77,7 +119,10 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
 
                 ui.horizontal(|ui| {
                     ui.label("Callsign File:");
-                    if ui.text_edit_singleline(&mut settings.contest.callsign_file).changed() {
+                    if ui
+                        .text_edit_singleline(&mut settings.contest.callsign_file)
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
@@ -91,19 +136,29 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Max Simultaneous Stations:");
-                    if ui.add(
-                        egui::Slider::new(&mut settings.simulation.max_simultaneous_stations, 1..=5)
-                    ).changed() {
+                    if ui
+                        .add(egui::Slider::new(
+                            &mut settings.simulation.max_simultaneous_stations,
+                            1..=5,
+                        ))
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
 
                 ui.horizontal(|ui| {
                     ui.label("Station Probability:");
-                    if ui.add(
-                        egui::Slider::new(&mut settings.simulation.station_probability, 0.1..=1.0)
-                            .fixed_decimals(2)
-                    ).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut settings.simulation.station_probability,
+                                0.1..=1.0,
+                            )
+                            .fixed_decimals(2),
+                        )
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
@@ -111,15 +166,13 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
                 ui.horizontal(|ui| {
                     ui.label("WPM Range:");
                     let mut changed = false;
-                    changed |= ui.add(
-                        egui::DragValue::new(&mut settings.simulation.wpm_min)
-                            .range(10..=50)
-                    ).changed();
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut settings.simulation.wpm_min).range(10..=50))
+                        .changed();
                     ui.label("-");
-                    changed |= ui.add(
-                        egui::DragValue::new(&mut settings.simulation.wpm_max)
-                            .range(10..=50)
-                    ).changed();
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut settings.simulation.wpm_max).range(10..=50))
+                        .changed();
                     if changed {
                         // Ensure min <= max
                         if settings.simulation.wpm_min > settings.simulation.wpm_max {
@@ -131,10 +184,16 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
 
                 ui.horizontal(|ui| {
                     ui.label("Frequency Spread (Hz):");
-                    if ui.add(
-                        egui::Slider::new(&mut settings.simulation.frequency_spread_hz, 0.0..=1000.0)
-                            .fixed_decimals(0)
-                    ).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut settings.simulation.frequency_spread_hz,
+                                0.0..=1000.0,
+                            )
+                            .fixed_decimals(0),
+                        )
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
@@ -142,16 +201,20 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
                 ui.horizontal(|ui| {
                     ui.label("Signal Strength Range:");
                     let mut changed = false;
-                    changed |= ui.add(
-                        egui::Slider::new(&mut settings.simulation.amplitude_min, 0.1..=1.0)
-                            .fixed_decimals(2)
-                            .text("min")
-                    ).changed();
-                    changed |= ui.add(
-                        egui::Slider::new(&mut settings.simulation.amplitude_max, 0.1..=1.0)
-                            .fixed_decimals(2)
-                            .text("max")
-                    ).changed();
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut settings.simulation.amplitude_min, 0.1..=1.0)
+                                .fixed_decimals(2)
+                                .text("min"),
+                        )
+                        .changed();
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut settings.simulation.amplitude_max, 0.1..=1.0)
+                                .fixed_decimals(2)
+                                .text("max"),
+                        )
+                        .changed();
                     if changed {
                         if settings.simulation.amplitude_min > settings.simulation.amplitude_max {
                             settings.simulation.amplitude_max = settings.simulation.amplitude_min;
@@ -169,30 +232,42 @@ pub fn render_settings_panel(ui: &mut egui::Ui, settings: &mut AppSettings, sett
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Tone Frequency (Hz):");
-                    if ui.add(
-                        egui::Slider::new(&mut settings.audio.tone_frequency_hz, 400.0..=1000.0)
-                            .fixed_decimals(0)
-                    ).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut settings.audio.tone_frequency_hz,
+                                400.0..=1000.0,
+                            )
+                            .fixed_decimals(0),
+                        )
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
 
                 ui.horizontal(|ui| {
                     ui.label("Noise Level:");
-                    if ui.add(
-                        egui::Slider::new(&mut settings.audio.noise_level, 0.0..=0.5)
-                            .fixed_decimals(2)
-                    ).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.noise_level, 0.0..=0.5)
+                                .fixed_decimals(2),
+                        )
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });
 
                 ui.horizontal(|ui| {
                     ui.label("Master Volume:");
-                    if ui.add(
-                        egui::Slider::new(&mut settings.audio.master_volume, 0.0..=1.0)
-                            .fixed_decimals(2)
-                    ).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.master_volume, 0.0..=1.0)
+                                .fixed_decimals(2),
+                        )
+                        .changed()
+                    {
                         *settings_changed = true;
                     }
                 });

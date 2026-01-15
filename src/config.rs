@@ -15,6 +15,7 @@ pub struct UserSettings {
     pub name: String,
     pub zone: u8,
     pub section: String,
+    pub wpm: u8,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -60,6 +61,7 @@ impl Default for UserSettings {
             name: "OP".to_string(),
             zone: 5,
             section: "CT".to_string(),
+            wpm: 32,
         }
     }
 }
