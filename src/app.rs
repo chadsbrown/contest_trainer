@@ -447,15 +447,17 @@ impl ContestApp {
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
-            // F1 - Send CQ
+            // F1 - Send CQ (always available - resets state and starts fresh)
             if i.key_pressed(Key::F1) {
-                match self.state {
-                    ContestState::Idle | ContestState::QsoComplete { .. } => {
-                        self.spawner.reset();
-                        self.send_cq();
-                    }
-                    _ => {}
-                }
+                // Stop any playing audio
+                let _ = self.cmd_tx.send(AudioCommand::StopAll);
+                // Reset spawner and inputs
+                self.spawner.reset();
+                self.callsign_input.clear();
+                self.exchange_input.clear();
+                self.current_field = InputField::Callsign;
+                // Send CQ
+                self.send_cq();
             }
 
             // F2 - Send Exchange (uses callsign from input field if available)
@@ -490,11 +492,21 @@ impl ContestApp {
                 self.handle_partial_query();
             }
 
-            // Enter - Submit current field
+            // Enter - Submit current field (or send CQ if callsign field is empty)
             if i.key_pressed(Key::Enter) {
                 match self.current_field {
                     InputField::Callsign => {
-                        self.handle_callsign_submit();
+                        if self.callsign_input.trim().is_empty() {
+                            // Empty callsign field - act like F1 (send CQ)
+                            let _ = self.cmd_tx.send(AudioCommand::StopAll);
+                            self.spawner.reset();
+                            self.callsign_input.clear();
+                            self.exchange_input.clear();
+                            self.current_field = InputField::Callsign;
+                            self.send_cq();
+                        } else {
+                            self.handle_callsign_submit();
+                        }
                     }
                     InputField::Exchange => {
                         self.handle_exchange_submit();
