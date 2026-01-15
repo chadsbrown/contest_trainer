@@ -6,17 +6,7 @@ pub fn render_settings_panel(
     ui: &mut egui::Ui,
     settings: &mut AppSettings,
     settings_changed: &mut bool,
-    show_settings: &mut bool,
 ) {
-    ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Close").clicked() {
-                *show_settings = false;
-            }
-        });
-    });
-    ui.separator();
-
     egui::ScrollArea::vertical().show(ui, |ui| {
         // User Settings
         egui::CollapsingHeader::new(RichText::new("User Settings").strong())
