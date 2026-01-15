@@ -34,6 +34,11 @@ pub enum ContestState {
     },
     /// User entered callsign, we're sending their exchange
     SendingExchange { caller: ActiveCaller },
+    /// Brief pause before station sends their exchange
+    WaitingToSendExchange {
+        caller: ActiveCaller,
+        wait_until: Instant,
+    },
     /// Station is sending their exchange
     ReceivingExchange { caller: ActiveCaller },
     /// QSO complete, showing result
@@ -332,23 +337,10 @@ impl ContestApp {
                             self.last_cq_finished = Some(Instant::now());
                         }
                         ContestState::SendingExchange { caller } => {
-                            // Our exchange sent, now station sends just their exchange
+                            // Our exchange sent, wait briefly before station responds
                             let caller = caller.clone();
-
-                            // Have the station send only their exchange (not callsign again)
-                            let exchange_str =
-                                self.contest.format_sent_exchange(&caller.params.exchange);
-
-                            let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                                id: caller.params.id,
-                                callsign: exchange_str,
-                                exchange: caller.params.exchange.clone(),
-                                frequency_offset_hz: caller.params.frequency_offset_hz,
-                                wpm: caller.params.wpm,
-                                amplitude: caller.params.amplitude,
-                            }));
-
-                            self.state = ContestState::ReceivingExchange { caller };
+                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                            self.state = ContestState::WaitingToSendExchange { caller, wait_until };
                         }
                         ContestState::QsoComplete { .. } => {
                             // TU finished - maybe a tail-ender jumps in
@@ -415,6 +407,28 @@ impl ContestApp {
         }
 
         self.state = ContestState::StationsCalling { callers };
+    }
+
+    fn check_waiting_to_send_exchange(&mut self) {
+        if let ContestState::WaitingToSendExchange { caller, wait_until } = &self.state {
+            if Instant::now() >= *wait_until {
+                let caller = caller.clone();
+
+                // Have the station send only their exchange (not callsign again)
+                let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
+
+                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                    id: caller.params.id,
+                    callsign: exchange_str,
+                    exchange: caller.params.exchange.clone(),
+                    frequency_offset_hz: caller.params.frequency_offset_hz,
+                    wpm: caller.params.wpm,
+                    amplitude: caller.params.amplitude,
+                }));
+
+                self.state = ContestState::ReceivingExchange { caller };
+            }
+        }
     }
 
     fn maybe_spawn_callers(&mut self) {
@@ -563,6 +577,13 @@ impl ContestApp {
 
 impl eframe::App for ContestApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Apply font size
+        ctx.style_mut(|style| {
+            style.text_styles.iter_mut().for_each(|(_, font_id)| {
+                font_id.size = self.settings.user.font_size;
+            });
+        });
+
         // Process audio engine commands
         if let Some(ref engine) = self.audio_engine {
             engine.process_commands();
@@ -573,6 +594,9 @@ impl eframe::App for ContestApp {
 
         // Maybe spawn callers
         self.maybe_spawn_callers();
+
+        // Check if waiting to send exchange
+        self.check_waiting_to_send_exchange();
 
         // Handle keyboard input
         self.handle_keyboard(ctx);
@@ -611,8 +635,6 @@ impl eframe::App for ContestApp {
 
         // Main content
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("CW Contest Trainer");
-            ui.separator();
             render_main_panel(ui, self);
         });
 

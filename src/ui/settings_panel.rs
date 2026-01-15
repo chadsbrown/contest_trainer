@@ -61,6 +61,19 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                ui.horizontal(|ui| {
+                    ui.label("Font Size:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.user.font_size, 10.0..=24.0)
+                                .fixed_decimals(0),
+                        )
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
             });
 
         ui.add_space(8.0);

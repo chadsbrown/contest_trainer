@@ -59,6 +59,7 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
         }
         ContestState::QueryingPartial { .. } => ("Querying partial...", Color32::YELLOW),
         ContestState::SendingExchange { .. } => ("Sending exchange...", Color32::YELLOW),
+        ContestState::WaitingToSendExchange { .. } => ("Sending exchange...", Color32::YELLOW),
         ContestState::ReceivingExchange { .. } => {
             ("Receiving exchange - type what you copy", Color32::GREEN)
         }

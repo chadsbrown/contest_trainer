@@ -16,6 +16,7 @@ pub struct UserSettings {
     pub zone: u8,
     pub section: String,
     pub wpm: u8,
+    pub font_size: f32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -62,6 +63,7 @@ impl Default for UserSettings {
             zone: 5,
             section: "CT".to_string(),
             wpm: 32,
+            font_size: 14.0,
         }
     }
 }
