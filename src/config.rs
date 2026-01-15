@@ -56,7 +56,7 @@ impl Default for AppSettings {
 impl Default for UserSettings {
     fn default() -> Self {
         Self {
-            callsign: "W1ABC".to_string(),
+            callsign: "N9UNX".to_string(),
             name: "OP".to_string(),
             zone: 5,
             section: "CT".to_string(),
@@ -88,9 +88,9 @@ impl Default for SimulationSettings {
     fn default() -> Self {
         Self {
             max_simultaneous_stations: 2,
-            station_probability: 0.3,
-            wpm_min: 22,
-            wpm_max: 32,
+            station_probability: 0.7,
+            wpm_min: 28,
+            wpm_max: 36,
             frequency_spread_hz: 400.0,
             amplitude_min: 0.4,
             amplitude_max: 1.0,
