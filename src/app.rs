@@ -293,14 +293,47 @@ impl ContestApp {
                             self.state = ContestState::ReceivingExchange { caller };
                         }
                         ContestState::QsoComplete { .. } => {
-                            // TU finished, ready for next CQ
-                            self.state = ContestState::Idle;
+                            // TU finished - maybe a tail-ender jumps in
+                            self.try_spawn_tail_ender();
                         }
                         _ => {}
                     }
                 }
             }
         }
+    }
+
+    /// Try to spawn a tail-ender after TU - a station that calls immediately
+    /// without waiting for another CQ
+    fn try_spawn_tail_ender(&mut self) {
+        use rand::Rng;
+
+        let mut rng = rand::thread_rng();
+
+        // Use the same probability as normal station spawning
+        if rng.gen::<f32>() > self.settings.simulation.station_probability {
+            // No tail-ender, go to idle
+            self.state = ContestState::Idle;
+            return;
+        }
+
+        // Try to spawn a station
+        let new_stations = self.spawner.tick(self.contest.as_ref());
+
+        if new_stations.is_empty() {
+            // Couldn't spawn, go to idle
+            self.state = ContestState::Idle;
+            return;
+        }
+
+        // Spawn the tail-ender(s)
+        let mut callers = Vec::new();
+        for params in new_stations {
+            let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
+            callers.push(ActiveCaller { params });
+        }
+
+        self.state = ContestState::StationsCalling { callers };
     }
 
     fn maybe_spawn_callers(&mut self) {
