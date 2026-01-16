@@ -208,6 +208,55 @@ impl ContestApp {
         });
     }
 
+    /// Calculate similarity between two strings (0.0 to 1.0)
+    /// Uses longest common subsequence ratio
+    fn callsign_similarity(a: &str, b: &str) -> f32 {
+        if a.is_empty() || b.is_empty() {
+            return 0.0;
+        }
+
+        // Count matching characters in sequence
+        let a_chars: Vec<char> = a.chars().collect();
+        let b_chars: Vec<char> = b.chars().collect();
+
+        let mut matches = 0;
+        let mut b_idx = 0;
+        for a_char in &a_chars {
+            for j in b_idx..b_chars.len() {
+                if *a_char == b_chars[j] {
+                    matches += 1;
+                    b_idx = j + 1;
+                    break;
+                }
+            }
+        }
+
+        // Also check if one contains the other as substring
+        if a.contains(b) || b.contains(a) {
+            let shorter = a.len().min(b.len()) as f32;
+            let longer = a.len().max(b.len()) as f32;
+            return shorter / longer;
+        }
+
+        (2.0 * matches as f32) / (a.len() + b.len()) as f32
+    }
+
+    /// Find the most similar caller to the entered text
+    /// Returns None if no caller is similar enough (threshold: 0.4)
+    fn find_similar_caller<'a>(
+        entered: &str,
+        callers: &'a [ActiveCaller],
+    ) -> Option<&'a ActiveCaller> {
+        const SIMILARITY_THRESHOLD: f32 = 0.4;
+
+        callers
+            .iter()
+            .map(|c| (c, Self::callsign_similarity(entered, &c.params.callsign)))
+            .filter(|(_, sim)| *sim >= SIMILARITY_THRESHOLD)
+            .max_by(|(_, sim_a), (_, sim_b)| sim_a.partial_cmp(sim_b).unwrap())
+            .map(|(caller, _)| caller)
+    }
+
     fn handle_partial_query(&mut self) {
         let partial = self.callsign_input.trim().to_uppercase();
         if partial.is_empty() {
@@ -220,21 +269,19 @@ impl ContestApp {
             _ => return,
         };
 
-        // Find callers that match the partial (case-insensitive substring match)
-        let matching: Vec<ActiveCaller> = callers
-            .into_iter()
-            .filter(|c| c.params.callsign.contains(&partial))
-            .collect();
+        // Find the most similar caller
+        let matching_caller = Self::find_similar_caller(&partial, &callers);
 
-        if matching.is_empty() {
-            // No match - could send "AGN" anyway, but for now just ignore
+        if matching_caller.is_none() {
+            // No similar match - do nothing
             return;
         }
 
         // Send the partial query
         self.send_partial_query(&partial);
 
-        // Transition to QueryingPartial state
+        // Transition to QueryingPartial state with only the matching caller
+        let matching = matching_caller.into_iter().cloned().collect();
         self.state = ContestState::QueryingPartial {
             callers: matching,
             partial,
@@ -248,17 +295,8 @@ impl ContestApp {
         }
 
         if let ContestState::StationsCalling { ref callers } = self.state {
-            // Find the caller that matches what the user entered
-            // First try exact match, then partial match
-            let caller = callers
-                .iter()
-                .find(|c| c.params.callsign == entered_call)
-                .or_else(|| {
-                    callers
-                        .iter()
-                        .find(|c| c.params.callsign.contains(&entered_call))
-                })
-                .cloned();
+            // Find the most similar caller
+            let caller = Self::find_similar_caller(&entered_call, callers).cloned();
 
             if let Some(caller) = caller {
                 // Send our exchange to them
@@ -267,6 +305,7 @@ impl ContestApp {
                 self.state = ContestState::SendingExchange { caller };
                 self.current_field = InputField::Exchange;
             }
+            // If no similar caller found, do nothing - user should press F1 to CQ again
         }
     }
 
