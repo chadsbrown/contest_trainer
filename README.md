@@ -124,6 +124,10 @@ Settings are stored in:
 - macOS: `~/Library/Application Support/contest_trainer/settings.toml`
 - Windows: `%APPDATA%\contest_trainer\settings.toml`
 
+## Acknowledgements
+
+This application was created collaboratively with [Claude](https://www.anthropic.com/claude) (Opus), an AI assistant by Anthropic.
+
 ## License
 
 MIT License
