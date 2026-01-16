@@ -669,6 +669,13 @@ impl ContestApp {
                 self.handle_agn_request();
             }
 
+            // F12 - Wipe (clear callsign and exchange fields)
+            if i.key_pressed(Key::F12) {
+                self.callsign_input.clear();
+                self.exchange_input.clear();
+                self.current_field = InputField::Callsign;
+            }
+
             // Enter - Submit current field (or send CQ if callsign field is empty)
             if i.key_pressed(Key::Enter) {
                 match self.current_field {

@@ -45,7 +45,7 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
 
     // Bottom buttons
     ui.horizontal(|ui| {
-        if ui.button("Reset").clicked() {
+        if ui.button("Reset Stats").clicked() {
             app.reset_score();
         }
 
@@ -172,6 +172,10 @@ fn render_key_hints(ui: &mut egui::Ui) {
 
         ui.label(RichText::new("F8").strong().monospace());
         ui.label("AGN?");
+        ui.add_space(10.0);
+
+        ui.label(RichText::new("F12").strong().monospace());
+        ui.label("Wipe");
         ui.add_space(10.0);
 
         ui.label(RichText::new("Enter").strong().monospace());
