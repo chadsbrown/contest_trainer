@@ -9,6 +9,17 @@ pub enum ContestType {
     Cwt,
 }
 
+impl ContestType {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ContestType::CqWw => "CQ World Wide",
+            ContestType::NaSprint => "NA Sprint",
+            ContestType::Sweepstakes => "ARRL Sweepstakes",
+            ContestType::Cwt => "CWT",
+        }
+    }
+}
+
 /// Contest exchange data (varies by contest type)
 #[derive(Clone, Debug)]
 pub enum Exchange {

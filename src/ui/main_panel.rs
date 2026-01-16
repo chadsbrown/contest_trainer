@@ -2,6 +2,14 @@ use crate::app::{ContestApp, ContestState, InputField, Score};
 use egui::{Color32, RichText, Vec2};
 
 pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
+    // Contest type display
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Contest:").strong());
+        ui.label(app.settings.contest.contest_type.display_name());
+    });
+
+    ui.add_space(4.0);
+
     // Top bar: Score display
     render_score_bar(ui, &app.score);
 
