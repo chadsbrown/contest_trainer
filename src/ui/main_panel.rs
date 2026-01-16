@@ -81,7 +81,7 @@ fn render_score_bar(ui: &mut egui::Ui, score: &Score) {
 
 fn render_status(ui: &mut egui::Ui, state: &ContestState) {
     let (status_text, status_color) = match state {
-        ContestState::Idle => ("Press F1 to call CQ", Color32::GRAY),
+        ContestState::Idle => ("Press F1/Enter to call CQ", Color32::GRAY),
         ContestState::CallingCq => ("Calling CQ...", Color32::YELLOW),
         ContestState::WaitingForCallers => ("Waiting for callers...", Color32::LIGHT_BLUE),
         ContestState::StationsCalling { .. } => {

@@ -12,7 +12,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
    - macOS Apple Silicon: `contest_trainer-macos-aarch64`
    - Linux: `contest_trainer-linux-x86_64`
 
-2. **Download the callsign files** from this repository and place them in the same directory as the binary:
+2. **Download the callsign files** from this repository (right click, save as) and place them in the same directory as the binary:
    - [`callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/callsigns.txt) - for non-CWT contests
    - [`cwt_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/cwt_callsigns.txt) - for CWT contest
 
