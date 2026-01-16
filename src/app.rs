@@ -217,7 +217,9 @@ impl ContestApp {
     }
 
     fn send_cq(&mut self) {
-        let message = format!("CQ TEST {}", self.settings.user.callsign);
+        let cq_prefix = self.settings.contest.cq_message.trim();
+        let callsign = self.settings.user.callsign.trim();
+        let message = format!("{} {}", cq_prefix, callsign);
         let wpm = self.settings.user.wpm;
 
         let _ = self
@@ -674,6 +676,22 @@ impl ContestApp {
                 self.callsign_input.clear();
                 self.exchange_input.clear();
                 self.current_field = InputField::Callsign;
+            }
+
+            // Up arrow - Increase WPM
+            if i.key_pressed(Key::ArrowUp) {
+                if self.settings.user.wpm < 50 {
+                    self.settings.user.wpm += 1;
+                    self.settings_changed = true;
+                }
+            }
+
+            // Down arrow - Decrease WPM
+            if i.key_pressed(Key::ArrowDown) {
+                if self.settings.user.wpm > 15 {
+                    self.settings.user.wpm -= 1;
+                    self.settings_changed = true;
+                }
             }
 
             // Enter - Submit current field (or send CQ if callsign field is empty)

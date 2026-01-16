@@ -161,6 +161,16 @@ pub fn render_settings_panel(
                         }
                     });
                 }
+
+                ui.horizontal(|ui| {
+                    ui.label("CQ Message:");
+                    if ui
+                        .text_edit_singleline(&mut settings.contest.cq_message)
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
             });
 
         ui.add_space(8.0);

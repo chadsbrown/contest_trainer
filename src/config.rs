@@ -25,6 +25,7 @@ pub struct ContestSettings {
     pub contest_type: ContestType,
     pub callsign_file: String,
     pub cwt_callsign_file: String,
+    pub cq_message: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,6 +78,7 @@ impl Default for ContestSettings {
             contest_type: ContestType::Cwt,
             callsign_file: "callsigns.txt".to_string(),
             cwt_callsign_file: "cwt_callsigns.txt".to_string(),
+            cq_message: "CQ TEST".to_string(),
         }
     }
 }

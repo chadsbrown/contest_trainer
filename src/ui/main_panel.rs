@@ -11,7 +11,7 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     ui.add_space(4.0);
 
     // Top bar: Score display
-    render_score_bar(ui, &app.score);
+    render_score_bar(ui, &app.score, app.settings.user.wpm);
 
     ui.add_space(8.0);
     ui.separator();
@@ -62,7 +62,7 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     });
 }
 
-fn render_score_bar(ui: &mut egui::Ui, score: &Score) {
+fn render_score_bar(ui: &mut egui::Ui, score: &Score, user_wpm: u8) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("QSOs:").strong());
         ui.label(format!("{}", score.qso_count));
@@ -76,6 +76,11 @@ fn render_score_bar(ui: &mut egui::Ui, score: &Score) {
 
         ui.label(RichText::new("Rate:").strong());
         ui.label(format!("{}/hr", score.hourly_rate()));
+
+        ui.add_space(20.0);
+
+        ui.label(RichText::new("Run WPM:").strong());
+        ui.label(format!("{}", user_wpm));
     });
 }
 
