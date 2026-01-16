@@ -18,22 +18,22 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact_name: contest_trainer-linux-x86_64
+            binary_name: contest_trainer
             asset_name: contest_trainer-linux-x86_64
 
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact_name: contest_trainer.exe
+            binary_name: contest_trainer.exe
             asset_name: contest_trainer-windows-x86_64.exe
 
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact_name: contest_trainer-macos-x86_64
+            binary_name: contest_trainer
             asset_name: contest_trainer-macos-x86_64
 
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact_name: contest_trainer-macos-aarch64
+            binary_name: contest_trainer
             asset_name: contest_trainer-macos-aarch64
 
     steps:
@@ -54,11 +54,16 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Rename binary
+        shell: bash
+        run: |
+          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} ${{ matrix.asset_name }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          path: ${{ matrix.asset_name }}
 
   release:
     name: Create Release
@@ -81,7 +86,7 @@ jobs:
         with:
           files: |
             artifacts/contest_trainer-linux-x86_64/contest_trainer-linux-x86_64
-            artifacts/contest_trainer-windows-x86_64.exe/contest_trainer.exe
+            artifacts/contest_trainer-windows-x86_64.exe/contest_trainer-windows-x86_64.exe
             artifacts/contest_trainer-macos-x86_64/contest_trainer-macos-x86_64
             artifacts/contest_trainer-macos-aarch64/contest_trainer-macos-aarch64
           generate_release_notes: true
