@@ -732,18 +732,27 @@ impl eframe::App for ContestApp {
             });
         });
 
-        // Settings window
+        // Settings window (separate OS window)
         if self.show_settings {
-            let mut open = self.show_settings;
-            egui::Window::new("Settings")
-                .resizable(true)
-                .collapsible(false)
-                .default_width(350.0)
-                .open(&mut open)
-                .show(ctx, |ui| {
-                    render_settings_panel(ui, &mut self.settings, &mut self.settings_changed);
-                });
-            self.show_settings = open;
+            let settings = &mut self.settings;
+            let settings_changed = &mut self.settings_changed;
+            let show_settings = &mut self.show_settings;
+
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("settings_viewport"),
+                egui::ViewportBuilder::default()
+                    .with_title("Settings")
+                    .with_inner_size([400.0, 500.0]),
+                |ctx, _class| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        render_settings_panel(ui, settings, settings_changed);
+                    });
+
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        *show_settings = false;
+                    }
+                },
+            );
         }
 
         // Main content
