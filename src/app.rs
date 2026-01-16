@@ -802,7 +802,7 @@ impl eframe::App for ContestApp {
                 egui::ViewportId::from_hash_of("settings_viewport"),
                 egui::ViewportBuilder::default()
                     .with_title("Settings")
-                    .with_inner_size([400.0, 500.0]),
+                    .with_inner_size([440.0, 520.0]),
                 |ctx, _class| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         render_settings_panel(ui, settings, settings_changed);
