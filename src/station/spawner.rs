@@ -144,10 +144,9 @@ impl StationSpawner {
         self.active_count = self.active_count.saturating_sub(1);
     }
 
-    /// Reset all state
+    /// Reset active count (but not callsign tracking, to avoid repeats)
     pub fn reset(&mut self) {
         self.active_count = 0;
-        self.callsigns.reset();
     }
 
     /// Get current active station count
