@@ -38,6 +38,28 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     if let Some(ref last) = app.last_qso_result {
         render_last_qso(ui, last);
     }
+
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(8.0);
+
+    // Bottom buttons
+    ui.horizontal(|ui| {
+        if ui.button("Reset").clicked() {
+            app.reset_score();
+        }
+
+        ui.add_space(10.0);
+
+        let noise_label = if app.noise_enabled {
+            "Toggle Static (ON)"
+        } else {
+            "Toggle Static (OFF)"
+        };
+        if ui.button(noise_label).clicked() {
+            app.toggle_noise();
+        }
+    });
 }
 
 fn render_score_bar(ui: &mut egui::Ui, score: &Score) {

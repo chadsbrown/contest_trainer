@@ -120,6 +120,10 @@ pub struct ContestApp {
 
     // Timing for caller spawning
     last_cq_finished: Option<Instant>,
+
+    // Noise toggle state
+    pub noise_enabled: bool,
+    saved_noise_level: f32,
 }
 
 impl ContestApp {
@@ -153,6 +157,9 @@ impl ContestApp {
             StationSpawner::new(callsigns, settings.simulation.clone())
         };
 
+        let noise_enabled = settings.audio.noise_level > 0.0;
+        let saved_noise_level = settings.audio.noise_level;
+
         Self {
             settings,
             state: ContestState::Idle,
@@ -170,7 +177,36 @@ impl ContestApp {
             show_settings: false,
             settings_changed: false,
             last_cq_finished: None,
+            noise_enabled,
+            saved_noise_level,
         }
+    }
+
+    pub fn reset_score(&mut self) {
+        self.score = Score::default();
+        self.last_qso_result = None;
+        self.user_serial = 1;
+    }
+
+    pub fn toggle_noise(&mut self) {
+        if self.noise_enabled {
+            // Save current level and disable
+            self.saved_noise_level = self.settings.audio.noise_level;
+            self.settings.audio.noise_level = 0.0;
+            self.noise_enabled = false;
+        } else {
+            // Restore saved level (use default if saved was 0)
+            self.settings.audio.noise_level = if self.saved_noise_level > 0.0 {
+                self.saved_noise_level
+            } else {
+                0.15
+            };
+            self.noise_enabled = true;
+        }
+        // Send updated settings to audio engine
+        let _ = self
+            .cmd_tx
+            .send(AudioCommand::UpdateSettings(self.settings.audio.clone()));
     }
 
     fn send_cq(&mut self) {
