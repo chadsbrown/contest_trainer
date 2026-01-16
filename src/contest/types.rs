@@ -6,6 +6,7 @@ pub enum ContestType {
     CqWw,
     NaSprint,
     Sweepstakes,
+    Cwt,
 }
 
 /// Contest exchange data (varies by contest type)
@@ -25,6 +26,10 @@ pub enum Exchange {
         precedence: char,
         check: u16,
         section: String,
+    },
+    Cwt {
+        name: String,
+        number: String, // member number or state/country
     },
 }
 
@@ -64,9 +69,21 @@ pub trait Contest: Send + Sync {
     fn format_sent_exchange(&self, exchange: &Exchange) -> String;
 
     /// Get the user's exchange to send
-    fn user_exchange(&self, callsign: &str, serial: u32, zone: u8, section: &str, name: &str) -> String;
+    fn user_exchange(
+        &self,
+        callsign: &str,
+        serial: u32,
+        zone: u8,
+        section: &str,
+        name: &str,
+    ) -> String;
 
     /// Validate user's logged exchange against expected
-    fn validate(&self, expected_call: &str, expected_exchange: &Exchange,
-                received_call: &str, received_exchange: &str) -> ValidationResult;
+    fn validate(
+        &self,
+        expected_call: &str,
+        expected_exchange: &Exchange,
+        received_call: &str,
+        received_exchange: &str,
+    ) -> ValidationResult;
 }

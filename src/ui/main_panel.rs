@@ -63,6 +63,8 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
         ContestState::ReceivingExchange { .. } => {
             ("Receiving exchange - type what you copy", Color32::GREEN)
         }
+        ContestState::SendingAgn { .. } => ("Requesting repeat...", Color32::YELLOW),
+        ContestState::WaitingForAgn { .. } => ("Waiting for repeat...", Color32::LIGHT_BLUE),
         ContestState::QsoComplete { .. } => (
             "QSO logged! Press F1 for next CQ",
             Color32::from_rgb(100, 200, 100),
@@ -111,6 +113,7 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
             crate::contest::ContestType::CqWw => "Format: RST ZONE (e.g., 599 05)",
             crate::contest::ContestType::NaSprint => "Format: NR NAME QTH (e.g., 123 BOB TX)",
             crate::contest::ContestType::Sweepstakes => "Format: NR PREC CK SEC (e.g., 42 A 99 CT)",
+            crate::contest::ContestType::Cwt => "Format: NAME NUMBER (e.g., BOB 123 or JOE TX)",
         };
         ui.label(RichText::new(hint).small().weak());
     });
@@ -132,6 +135,10 @@ fn render_key_hints(ui: &mut egui::Ui) {
 
         ui.label(RichText::new("F5").strong().monospace());
         ui.label("His Call");
+        ui.add_space(10.0);
+
+        ui.label(RichText::new("F8").strong().monospace());
+        ui.label("AGN?");
         ui.add_space(10.0);
 
         ui.label(RichText::new("Enter").strong().monospace());

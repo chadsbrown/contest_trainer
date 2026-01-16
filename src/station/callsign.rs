@@ -2,9 +2,25 @@ use rand::seq::SliceRandom;
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::contest::Exchange;
+
+/// CWT station data (callsign + name + member number)
+#[derive(Clone, Debug)]
+pub struct CwtStation {
+    pub callsign: String,
+    pub name: String,
+    pub number: String,
+}
+
 /// Pool of callsigns loaded from file
 pub struct CallsignPool {
     callsigns: Vec<String>,
+    used: HashSet<String>,
+}
+
+/// Pool of CWT stations with name/number data
+pub struct CwtCallsignPool {
+    stations: Vec<CwtStation>,
     used: HashSet<String>,
 }
 
@@ -101,5 +117,123 @@ impl CallsignPool {
 
     pub fn is_empty(&self) -> bool {
         self.callsigns.is_empty()
+    }
+}
+
+impl CwtCallsignPool {
+    /// Load CWT stations from a file
+    ///
+    /// Format: CSV with fields: callsign, name, number (member # or state/country)
+    /// Lines starting with # or ! are ignored
+    /// Only lines with non-blank first three fields are accepted
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
+        let content = std::fs::read_to_string(path)?;
+        let stations: Vec<CwtStation> = content
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('!'))
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split(',').map(|f| f.trim()).collect();
+                if fields.len() >= 3 {
+                    let callsign = fields[0].to_uppercase();
+                    let name = fields[1].to_uppercase();
+                    let number = fields[2].to_uppercase();
+
+                    // All three fields must be non-blank
+                    if !callsign.is_empty()
+                        && !name.is_empty()
+                        && !number.is_empty()
+                        && CallsignPool::is_valid_callsign(&callsign)
+                    {
+                        return Some(CwtStation {
+                            callsign,
+                            name,
+                            number,
+                        });
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if stations.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "No valid CWT stations found in file",
+            ));
+        }
+
+        Ok(Self {
+            stations,
+            used: HashSet::new(),
+        })
+    }
+
+    /// Create a pool with default CWT stations
+    pub fn default_pool() -> Self {
+        let stations = vec![
+            CwtStation {
+                callsign: "W1AW".to_string(),
+                name: "JOE".to_string(),
+                number: "1".to_string(),
+            },
+            CwtStation {
+                callsign: "K5ZD".to_string(),
+                name: "RANDY".to_string(),
+                number: "2".to_string(),
+            },
+            CwtStation {
+                callsign: "N1MM".to_string(),
+                name: "TOM".to_string(),
+                number: "100".to_string(),
+            },
+            CwtStation {
+                callsign: "K3LR".to_string(),
+                name: "TIM".to_string(),
+                number: "55".to_string(),
+            },
+            CwtStation {
+                callsign: "W9RE".to_string(),
+                name: "MIKE".to_string(),
+                number: "IN".to_string(),
+            },
+        ];
+
+        Self {
+            stations,
+            used: HashSet::new(),
+        }
+    }
+
+    /// Get a random station (avoiding recently used ones)
+    /// Returns (callsign, Exchange::Cwt)
+    pub fn random(&mut self) -> Option<(String, Exchange)> {
+        let available: Vec<_> = self
+            .stations
+            .iter()
+            .filter(|s| !self.used.contains(&s.callsign))
+            .collect();
+
+        let station = if available.is_empty() {
+            // Reset if all used
+            self.used.clear();
+            self.stations.choose(&mut rand::thread_rng())?
+        } else {
+            *available.choose(&mut rand::thread_rng())?
+        };
+
+        self.used.insert(station.callsign.clone());
+        Some((
+            station.callsign.clone(),
+            Exchange::Cwt {
+                name: station.name.clone(),
+                number: station.number.clone(),
+            },
+        ))
+    }
+
+    /// Reset used stations
+    pub fn reset(&mut self) {
+        self.used.clear();
     }
 }

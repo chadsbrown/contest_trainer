@@ -17,12 +17,14 @@ pub struct UserSettings {
     pub section: String,
     pub wpm: u8,
     pub font_size: f32,
+    pub agn_message: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ContestSettings {
     pub contest_type: ContestType,
     pub callsign_file: String,
+    pub cwt_callsign_file: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,6 +66,7 @@ impl Default for UserSettings {
             section: "CT".to_string(),
             wpm: 32,
             font_size: 14.0,
+            agn_message: "?".to_string(),
         }
     }
 }
@@ -71,8 +74,9 @@ impl Default for UserSettings {
 impl Default for ContestSettings {
     fn default() -> Self {
         Self {
-            contest_type: ContestType::CqWw,
+            contest_type: ContestType::Cwt,
             callsign_file: "callsigns.txt".to_string(),
+            cwt_callsign_file: "cwt_callsigns.txt".to_string(),
         }
     }
 }

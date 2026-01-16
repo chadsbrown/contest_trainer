@@ -1,13 +1,40 @@
 use rand::Rng;
 use std::time::Instant;
 
-use super::callsign::CallsignPool;
+use super::callsign::{CallsignPool, CwtCallsignPool};
 use crate::config::SimulationSettings;
-use crate::contest::Contest;
+use crate::contest::{Contest, Exchange};
 use crate::messages::{StationId, StationParams};
 
+/// Source of callsigns - either regular or CWT-specific
+pub enum CallsignSource {
+    Regular(CallsignPool),
+    Cwt(CwtCallsignPool),
+}
+
+impl CallsignSource {
+    /// Get a random callsign and exchange
+    pub fn random(&mut self, contest: &dyn Contest, serial: u32) -> Option<(String, Exchange)> {
+        match self {
+            CallsignSource::Regular(pool) => {
+                let callsign = pool.random()?;
+                let exchange = contest.generate_exchange(&callsign, serial);
+                Some((callsign, exchange))
+            }
+            CallsignSource::Cwt(pool) => pool.random(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        match self {
+            CallsignSource::Regular(pool) => pool.reset(),
+            CallsignSource::Cwt(pool) => pool.reset(),
+        }
+    }
+}
+
 pub struct StationSpawner {
-    callsigns: CallsignPool,
+    callsigns: CallsignSource,
     settings: SimulationSettings,
     next_id: u32,
     active_count: usize,
@@ -18,7 +45,18 @@ pub struct StationSpawner {
 impl StationSpawner {
     pub fn new(callsigns: CallsignPool, settings: SimulationSettings) -> Self {
         Self {
-            callsigns,
+            callsigns: CallsignSource::Regular(callsigns),
+            settings,
+            next_id: 0,
+            active_count: 0,
+            last_spawn_time: Instant::now(),
+            serial_counter: 1,
+        }
+    }
+
+    pub fn new_cwt(callsigns: CwtCallsignPool, settings: SimulationSettings) -> Self {
+        Self {
+            callsigns: CallsignSource::Cwt(callsigns),
             settings,
             next_id: 0,
             active_count: 0,
@@ -32,9 +70,14 @@ impl StationSpawner {
         self.settings = settings;
     }
 
-    /// Update callsign pool
+    /// Update callsign pool (regular)
     pub fn update_callsigns(&mut self, callsigns: CallsignPool) {
-        self.callsigns = callsigns;
+        self.callsigns = CallsignSource::Regular(callsigns);
+    }
+
+    /// Update callsign pool (CWT)
+    pub fn update_cwt_callsigns(&mut self, callsigns: CwtCallsignPool) {
+        self.callsigns = CallsignSource::Cwt(callsigns);
     }
 
     /// Called each frame to potentially spawn new stations
@@ -55,13 +98,11 @@ impl StationSpawner {
                 break;
             }
 
-            // Pick a random callsign
-            let Some(callsign) = self.callsigns.random() else {
+            // Pick a random callsign and get exchange
+            let Some((callsign, exchange)) = self.callsigns.random(contest, self.serial_counter)
+            else {
                 break;
             };
-
-            // Generate exchange
-            let exchange = contest.generate_exchange(&callsign, self.serial_counter);
             self.serial_counter += 1;
 
             // Random parameters within configured ranges

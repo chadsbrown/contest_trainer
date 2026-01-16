@@ -74,6 +74,16 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                ui.horizontal(|ui| {
+                    ui.label("AGN Message:");
+                    if ui
+                        .text_edit_singleline(&mut settings.user.agn_message)
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
             });
 
         ui.add_space(8.0);
@@ -117,6 +127,16 @@ pub fn render_settings_panel(
                             {
                                 *settings_changed = true;
                             }
+                            if ui
+                                .selectable_value(
+                                    &mut settings.contest.contest_type,
+                                    ContestType::Cwt,
+                                    "CWT",
+                                )
+                                .changed()
+                            {
+                                *settings_changed = true;
+                            }
                         });
                 });
 
@@ -129,6 +149,18 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                if settings.contest.contest_type == ContestType::Cwt {
+                    ui.horizontal(|ui| {
+                        ui.label("CWT Callsign File:");
+                        if ui
+                            .text_edit_singleline(&mut settings.contest.cwt_callsign_file)
+                            .changed()
+                        {
+                            *settings_changed = true;
+                        }
+                    });
+                }
             });
 
         ui.add_space(8.0);

@@ -4,9 +4,10 @@ use std::time::Instant;
 
 use crate::audio::AudioEngine;
 use crate::config::AppSettings;
+use crate::contest::ContestType;
 use crate::contest::{self, Contest};
 use crate::messages::{AudioCommand, AudioEvent, StationParams};
-use crate::station::{CallsignPool, StationSpawner};
+use crate::station::{CallsignPool, CwtCallsignPool, StationSpawner};
 use crate::ui::{render_main_panel, render_settings_panel};
 
 /// Which input field is active
@@ -41,6 +42,13 @@ pub enum ContestState {
     },
     /// Station is sending their exchange
     ReceivingExchange { caller: ActiveCaller },
+    /// User requested AGN, sending AGN message
+    SendingAgn { caller: ActiveCaller },
+    /// Waiting for station to resend exchange after AGN
+    WaitingForAgn {
+        caller: ActiveCaller,
+        wait_until: Instant,
+    },
     /// QSO complete, showing result
     QsoComplete { result: QsoResult },
 }
@@ -134,12 +142,16 @@ impl ContestApp {
         // Create contest
         let contest = contest::create_contest(settings.contest.contest_type);
 
-        // Load callsigns
-        let callsigns = CallsignPool::load(&settings.contest.callsign_file)
-            .unwrap_or_else(|_| CallsignPool::default_pool());
-
-        // Create station spawner
-        let spawner = StationSpawner::new(callsigns, settings.simulation.clone());
+        // Load callsigns and create spawner based on contest type
+        let spawner = if settings.contest.contest_type == ContestType::Cwt {
+            let cwt_callsigns = CwtCallsignPool::load(&settings.contest.cwt_callsign_file)
+                .unwrap_or_else(|_| CwtCallsignPool::default_pool());
+            StationSpawner::new_cwt(cwt_callsigns, settings.simulation.clone())
+        } else {
+            let callsigns = CallsignPool::load(&settings.contest.callsign_file)
+                .unwrap_or_else(|_| CallsignPool::default_pool());
+            StationSpawner::new(callsigns, settings.simulation.clone())
+        };
 
         Self {
             settings,
@@ -355,6 +367,26 @@ impl ContestApp {
         self.current_field = InputField::Callsign;
     }
 
+    fn handle_agn_request(&mut self) {
+        // Only works when receiving exchange
+        let caller = match &self.state {
+            ContestState::ReceivingExchange { caller } => caller.clone(),
+            _ => return,
+        };
+
+        // Stop any current station audio
+        let _ = self.cmd_tx.send(AudioCommand::StopAll);
+
+        // Send the AGN message
+        let agn_message = self.settings.user.agn_message.clone();
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
+            message: agn_message,
+            wpm: self.settings.user.wpm,
+        });
+
+        self.state = ContestState::SendingAgn { caller };
+    }
+
     fn process_audio_events(&mut self) {
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
@@ -408,6 +440,12 @@ impl ContestApp {
                             // Go back to StationsCalling with only the matching callers
                             self.state = ContestState::StationsCalling { callers };
                         }
+                        ContestState::SendingAgn { caller } => {
+                            // AGN request sent, wait briefly before station resends exchange
+                            let caller = caller.clone();
+                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                            self.state = ContestState::WaitingForAgn { caller, wait_until };
+                        }
                         _ => {}
                     }
                 }
@@ -454,6 +492,28 @@ impl ContestApp {
                 let caller = caller.clone();
 
                 // Have the station send only their exchange (not callsign again)
+                let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
+
+                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                    id: caller.params.id,
+                    callsign: exchange_str,
+                    exchange: caller.params.exchange.clone(),
+                    frequency_offset_hz: caller.params.frequency_offset_hz,
+                    wpm: caller.params.wpm,
+                    amplitude: caller.params.amplitude,
+                }));
+
+                self.state = ContestState::ReceivingExchange { caller };
+            }
+        }
+    }
+
+    fn check_waiting_for_agn(&mut self) {
+        if let ContestState::WaitingForAgn { caller, wait_until } = &self.state {
+            if Instant::now() >= *wait_until {
+                let caller = caller.clone();
+
+                // Have the station resend their exchange
                 let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
 
                 let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
@@ -545,6 +605,11 @@ impl ContestApp {
                 self.handle_partial_query();
             }
 
+            // F8 - Request AGN (ask station to repeat exchange)
+            if i.key_pressed(Key::F8) {
+                self.handle_agn_request();
+            }
+
             // Enter - Submit current field (or send CQ if callsign field is empty)
             if i.key_pressed(Key::Enter) {
                 match self.current_field {
@@ -590,10 +655,16 @@ impl ContestApp {
             // Update contest type
             self.contest = contest::create_contest(self.settings.contest.contest_type);
 
-            // Update callsigns
-            let callsigns = CallsignPool::load(&self.settings.contest.callsign_file)
-                .unwrap_or_else(|_| CallsignPool::default_pool());
-            self.spawner.update_callsigns(callsigns);
+            // Update callsigns based on contest type
+            if self.settings.contest.contest_type == ContestType::Cwt {
+                let cwt_callsigns = CwtCallsignPool::load(&self.settings.contest.cwt_callsign_file)
+                    .unwrap_or_else(|_| CwtCallsignPool::default_pool());
+                self.spawner.update_cwt_callsigns(cwt_callsigns);
+            } else {
+                let callsigns = CallsignPool::load(&self.settings.contest.callsign_file)
+                    .unwrap_or_else(|_| CallsignPool::default_pool());
+                self.spawner.update_callsigns(callsigns);
+            }
 
             // Update spawner settings
             self.spawner
@@ -636,6 +707,9 @@ impl eframe::App for ContestApp {
 
         // Check if waiting to send exchange
         self.check_waiting_to_send_exchange();
+
+        // Check if waiting for AGN response
+        self.check_waiting_for_agn();
 
         // Handle keyboard input
         self.handle_keyboard(ctx);
