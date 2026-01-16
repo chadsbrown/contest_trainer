@@ -80,8 +80,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/contest_trainer-linux-x86_64/contest_trainer
+            artifacts/contest_trainer-linux-x86_64/contest_trainer-linux-x86_64
             artifacts/contest_trainer-windows-x86_64.exe/contest_trainer.exe
-            artifacts/contest_trainer-macos-x86_64/contest_trainer
-            artifacts/contest_trainer-macos-aarch64/contest_trainer
+            artifacts/contest_trainer-macos-x86_64/contest_trainer-macos-x86_64
+            artifacts/contest_trainer-macos-aarch64/contest_trainer-macos-aarch64
           generate_release_notes: true
