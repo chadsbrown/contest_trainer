@@ -4,6 +4,20 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 
 ![Screenshot](screenshot.png)
 
+## Quickstart
+
+1. **Download the binary** for your platform from the [Releases page](https://github.com/chadsbrown/contest_trainer/releases):
+   - Windows: `contest_trainer-windows-x86_64.exe`
+   - macOS Intel: `contest_trainer-macos-x86_64`
+   - macOS Apple Silicon: `contest_trainer-macos-aarch64`
+   - Linux: `contest_trainer-linux-x86_64`
+
+2. **Download the callsign files** from this repository and place them in the same directory as the binary:
+   - [`callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/callsigns.txt) - for non-CWT contests
+   - [`cwt_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/cwt_callsigns.txt) - for CWT contest
+
+3. **Run the application** and press F1 to send your first CQ!
+
 ## Features
 
 - **Multiple Contest Types**: Practice for CQ World Wide, NA Sprint, ARRL Sweepstakes, and CWT contests
