@@ -149,7 +149,7 @@ I created this for myself (N9UNX), but perhaps you might enjoy using it also.  T
 ## Roadmap
 
 - Perhaps add more contests, if people want them.  Honestly, I could live with just the CWT as the exchange is great practice (w/o a history file, as it is here, and in my opinion how it should be for a practice tool like this).
-- Perhaps think about what SO2R would be like, and how it should operate.
+- Perhaps think about what 2BSIQ would be like, and how it should operate.
 - Feedback welcome.
 
 ## License
