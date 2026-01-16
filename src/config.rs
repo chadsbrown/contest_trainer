@@ -121,10 +121,12 @@ impl AppSettings {
         let path = Self::config_path();
         match Self::load(&path) {
             Ok(settings) => {
+                #[cfg(debug_assertions)]
                 eprintln!("Loaded settings from {}", path.display());
                 settings
             }
             Err(_) => {
+                #[cfg(debug_assertions)]
                 eprintln!("Using default settings (no config at {})", path.display());
                 Self::default()
             }
@@ -147,6 +149,7 @@ impl AppSettings {
 
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&path, content)?;
+        #[cfg(debug_assertions)]
         eprintln!("Saved settings to {}", path.display());
         Ok(())
     }

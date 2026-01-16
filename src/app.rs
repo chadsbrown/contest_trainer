@@ -143,7 +143,9 @@ impl ContestApp {
         let audio_engine = match AudioEngine::new(cmd_rx, event_tx, settings.audio.clone()) {
             Ok(engine) => Some(engine),
             Err(e) => {
+                #[cfg(debug_assertions)]
                 eprintln!("Failed to initialize audio: {}", e);
+                let _ = e;
                 None
             }
         };
@@ -733,8 +735,9 @@ impl ContestApp {
                 .send(AudioCommand::UpdateSettings(self.settings.audio.clone()));
 
             // Save settings to file
-            if let Err(e) = self.settings.save() {
-                eprintln!("Failed to save settings: {}", e);
+            if let Err(_e) = self.settings.save() {
+                #[cfg(debug_assertions)]
+                eprintln!("Failed to save settings: {}", _e);
             }
 
             self.settings_changed = false;

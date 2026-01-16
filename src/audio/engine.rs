@@ -108,7 +108,11 @@ impl AudioEngine {
                     let _ = event_tx.try_send(AudioEvent::UserMessageComplete);
                 }
             },
-            |err| eprintln!("Audio stream error: {}", err),
+            |err| {
+                #[cfg(debug_assertions)]
+                eprintln!("Audio stream error: {}", err);
+                let _ = err;
+            },
             None,
         )
     }
