@@ -16,8 +16,9 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
    - [`callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/callsigns.txt) - for non-CWT contests
    - [`cwt_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/cwt_callsigns.txt) - for CWT contest
 
-3. **Personalize settings** (File->Settings) to configure your callsign, name and exchange info.
-4. **Run the application** and press F1/Enter to send your first CQ!
+3. **Run the application** 
+4. **Personalize settings** (File->Settings) to configure your callsign, name and exchange info.
+5. **Start running** by pressing F1/Enter to send your first CQ.
 
 ## Features
 
