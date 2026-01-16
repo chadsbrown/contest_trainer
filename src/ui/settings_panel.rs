@@ -42,7 +42,7 @@ pub fn render_settings_panel(
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label("Section:");
+                    ui.label("Section/Exchange:");
                     if ui
                         .text_edit_singleline(&mut settings.user.section)
                         .changed()

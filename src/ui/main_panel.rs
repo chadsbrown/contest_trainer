@@ -88,6 +88,9 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
             ("Station calling - enter callsign", Color32::GREEN)
         }
         ContestState::QueryingPartial { .. } => ("Querying partial...", Color32::YELLOW),
+        ContestState::WaitingForPartialResponse { .. } => {
+            ("Waiting for response...", Color32::LIGHT_BLUE)
+        }
         ContestState::SendingExchange { .. } => ("Sending exchange...", Color32::YELLOW),
         ContestState::WaitingToSendExchange { .. } => ("Sending exchange...", Color32::YELLOW),
         ContestState::ReceivingExchange { .. } => {
@@ -183,16 +186,8 @@ fn render_key_hints(ui: &mut egui::Ui) {
 fn render_last_qso(ui: &mut egui::Ui, result: &crate::app::QsoResult) {
     ui.add_space(4.0);
 
-    let call_indicator = if result.callsign_correct {
-        "✓"
-    } else {
-        "✗"
-    };
-    let exch_indicator = if result.exchange_correct {
-        "✓"
-    } else {
-        "✗"
-    };
+    let call_indicator = if result.callsign_correct { "OK" } else { "X" };
+    let exch_indicator = if result.exchange_correct { "OK" } else { "X" };
 
     let call_color = if result.callsign_correct {
         Color32::GREEN
@@ -208,8 +203,8 @@ fn render_last_qso(ui: &mut egui::Ui, result: &crate::app::QsoResult) {
     ui.horizontal(|ui| {
         ui.label("Last QSO:");
         ui.label(&result.callsign);
-        ui.label(RichText::new(format!("Call {}", call_indicator)).color(call_color));
-        ui.label(RichText::new(format!("Exch {}", exch_indicator)).color(exch_color));
+        ui.label(RichText::new(format!("Call: {}", call_indicator)).color(call_color));
+        ui.label(RichText::new(format!("Exch: {}", exch_indicator)).color(exch_color));
         if result.points > 0 {
             ui.label(RichText::new(format!("+{} pts", result.points)).color(Color32::GREEN));
         }

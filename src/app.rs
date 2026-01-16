@@ -33,6 +33,11 @@ pub enum ContestState {
         callers: Vec<ActiveCaller>,
         partial: String,
     },
+    /// Brief pause before station repeats callsign after partial query
+    WaitingForPartialResponse {
+        callers: Vec<ActiveCaller>,
+        wait_until: Instant,
+    },
     /// User entered callsign, we're sending their exchange
     SendingExchange { caller: ActiveCaller },
     /// Brief pause before station sends their exchange
@@ -457,24 +462,13 @@ impl ContestApp {
                             callers,
                             partial: _,
                         } => {
-                            // Partial query sent, matching station(s) repeat their callsign
+                            // Partial query sent, wait briefly before station repeats
                             let callers = callers.clone();
-
-                            for caller in &callers {
-                                // Station repeats just their callsign
-                                let _ =
-                                    self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                                        id: caller.params.id,
-                                        callsign: caller.params.callsign.clone(),
-                                        exchange: caller.params.exchange.clone(),
-                                        frequency_offset_hz: caller.params.frequency_offset_hz,
-                                        wpm: caller.params.wpm,
-                                        amplitude: caller.params.amplitude,
-                                    }));
-                            }
-
-                            // Go back to StationsCalling with only the matching callers
-                            self.state = ContestState::StationsCalling { callers };
+                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                            self.state = ContestState::WaitingForPartialResponse {
+                                callers,
+                                wait_until,
+                            };
                         }
                         ContestState::SendingAgn { caller } => {
                             // AGN request sent, wait briefly before station resends exchange
@@ -562,6 +556,33 @@ impl ContestApp {
                 }));
 
                 self.state = ContestState::ReceivingExchange { caller };
+            }
+        }
+    }
+
+    fn check_waiting_for_partial_response(&mut self) {
+        if let ContestState::WaitingForPartialResponse {
+            callers,
+            wait_until,
+        } = &self.state
+        {
+            if Instant::now() >= *wait_until {
+                let callers = callers.clone();
+
+                // Station(s) repeat their callsign
+                for caller in &callers {
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: caller.params.callsign.clone(),
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                    }));
+                }
+
+                // Go back to StationsCalling with only the matching callers
+                self.state = ContestState::StationsCalling { callers };
             }
         }
     }
@@ -746,6 +767,9 @@ impl eframe::App for ContestApp {
 
         // Check if waiting for AGN response
         self.check_waiting_for_agn();
+
+        // Check if waiting for partial response
+        self.check_waiting_for_partial_response();
 
         // Handle keyboard input
         self.handle_keyboard(ctx);
