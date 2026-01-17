@@ -34,6 +34,22 @@ pub struct AudioSettings {
     pub tone_frequency_hz: f32,
     pub noise_level: f32,
     pub master_volume: f32,
+    #[serde(default)]
+    pub noise: NoiseSettings,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NoiseSettings {
+    /// Rate of static crashes per second (0.0 to disable)
+    pub crash_rate: f32,
+    /// Intensity of crashes (0.0 - 1.0)
+    pub crash_intensity: f32,
+    /// Rate of pops/clicks per second (0.0 to disable)
+    pub pop_rate: f32,
+    /// Intensity of pops (0.0 - 1.0)
+    pub pop_intensity: f32,
+    /// QRN (atmospheric noise) intensity (0.0 - 1.0)
+    pub qrn_intensity: f32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -90,6 +106,19 @@ impl Default for AudioSettings {
             tone_frequency_hz: 600.0,
             noise_level: 0.15,
             master_volume: 0.7,
+            noise: NoiseSettings::default(),
+        }
+    }
+}
+
+impl Default for NoiseSettings {
+    fn default() -> Self {
+        Self {
+            crash_rate: 0.3,
+            crash_intensity: 0.4,
+            pop_rate: 2.0,
+            pop_intensity: 0.3,
+            qrn_intensity: 0.2,
         }
     }
 }

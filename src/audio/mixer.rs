@@ -230,7 +230,8 @@ impl Mixer {
         }
 
         // Add noise
-        self.noise.fill_buffer(buffer, self.settings.noise_level);
+        self.noise
+            .fill_buffer(buffer, self.settings.noise_level, &self.settings.noise);
 
         // Mix each calling station
         for station in &mut self.stations {

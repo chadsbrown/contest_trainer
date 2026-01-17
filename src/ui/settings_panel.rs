@@ -316,6 +316,82 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                ui.add_space(10.0);
+                ui.label(RichText::new("Static/QRN Settings").strong());
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    ui.label("Crash Rate:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.noise.crash_rate, 0.0..=2.0)
+                                .fixed_decimals(1)
+                                .suffix("/sec"),
+                        )
+                        .on_hover_text("Static crashes per second")
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Crash Intensity:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.noise.crash_intensity, 0.0..=1.0)
+                                .fixed_decimals(2),
+                        )
+                        .on_hover_text("Volume of static crashes")
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Pop Rate:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.noise.pop_rate, 0.0..=10.0)
+                                .fixed_decimals(1)
+                                .suffix("/sec"),
+                        )
+                        .on_hover_text("Clicks/pops per second")
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Pop Intensity:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.noise.pop_intensity, 0.0..=1.0)
+                                .fixed_decimals(2),
+                        )
+                        .on_hover_text("Volume of pops/clicks")
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("QRN Intensity:");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.noise.qrn_intensity, 0.0..=1.0)
+                                .fixed_decimals(2),
+                        )
+                        .on_hover_text("Atmospheric noise rumble")
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
             });
     });
 }
