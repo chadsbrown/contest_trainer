@@ -326,19 +326,14 @@ impl ContestApp {
             _ => return,
         };
 
-        // Find the most similar caller
-        let matching_caller = Self::find_similar_caller(&partial, &callers);
-
-        if matching_caller.is_none() {
-            // No similar match - do nothing
-            return;
-        }
-
         // Send the partial query
         self.send_partial_query(&partial);
 
-        // Transition to QueryingPartial state with only the matching caller
-        let matching = matching_caller.into_iter().cloned().collect();
+        // Find the most similar caller
+        let matching_caller = Self::find_similar_caller(&partial, &callers);
+
+        // Transition to QueryingPartial state with matching callers (may be empty)
+        let matching: Vec<ActiveCaller> = matching_caller.into_iter().cloned().collect();
         self.state = ContestState::QueryingPartial {
             callers: matching,
             partial,
@@ -573,20 +568,26 @@ impl ContestApp {
             if Instant::now() >= *wait_until {
                 let callers = callers.clone();
 
-                // Station(s) repeat their callsign
-                for caller in &callers {
-                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                        id: caller.params.id,
-                        callsign: caller.params.callsign.clone(),
-                        exchange: caller.params.exchange.clone(),
-                        frequency_offset_hz: caller.params.frequency_offset_hz,
-                        wpm: caller.params.wpm,
-                        amplitude: caller.params.amplitude,
-                    }));
-                }
+                if callers.is_empty() {
+                    // No matching callers - no response, go back to waiting for callers
+                    self.state = ContestState::WaitingForCallers;
+                    self.last_cq_finished = Some(Instant::now());
+                } else {
+                    // Station(s) repeat their callsign
+                    for caller in &callers {
+                        let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                            id: caller.params.id,
+                            callsign: caller.params.callsign.clone(),
+                            exchange: caller.params.exchange.clone(),
+                            frequency_offset_hz: caller.params.frequency_offset_hz,
+                            wpm: caller.params.wpm,
+                            amplitude: caller.params.amplitude,
+                        }));
+                    }
 
-                // Go back to StationsCalling with only the matching callers
-                self.state = ContestState::StationsCalling { callers };
+                    // Go back to StationsCalling with only the matching callers
+                    self.state = ContestState::StationsCalling { callers };
+                }
             }
         }
     }
