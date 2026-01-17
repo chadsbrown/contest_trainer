@@ -8,7 +8,8 @@ use crate::contest::ContestType;
 use crate::contest::{self, Contest};
 use crate::messages::{AudioCommand, AudioEvent, StationParams};
 use crate::station::{CallsignPool, CwtCallsignPool, StationSpawner};
-use crate::ui::{render_main_panel, render_settings_panel};
+use crate::stats::{QsoRecord, SessionStats};
+use crate::ui::{render_main_panel, render_settings_panel, render_stats_window};
 
 /// Which input field is active
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -129,6 +130,10 @@ pub struct ContestApp {
     // Noise toggle state
     pub noise_enabled: bool,
     saved_noise_level: f32,
+
+    // Session statistics
+    pub session_stats: SessionStats,
+    pub show_stats: bool,
 }
 
 impl ContestApp {
@@ -186,6 +191,8 @@ impl ContestApp {
             last_cq_finished: None,
             noise_enabled,
             saved_noise_level,
+            session_stats: SessionStats::new(),
+            show_stats: false,
         }
     }
 
@@ -363,12 +370,14 @@ impl ContestApp {
 
     fn handle_exchange_submit(&mut self) {
         let entered_exchange = self.exchange_input.trim().to_uppercase();
+        let entered_callsign = self.callsign_input.trim().to_uppercase();
 
         // Get the expected caller info
-        let (expected_call, expected_exchange_obj) = match &self.state {
+        let (expected_call, expected_exchange_obj, station_wpm) = match &self.state {
             ContestState::ReceivingExchange { caller } => (
                 caller.params.callsign.clone(),
                 caller.params.exchange.clone(),
+                caller.params.wpm,
             ),
             _ => return,
         };
@@ -378,18 +387,30 @@ impl ContestApp {
         let validation = self.contest.validate(
             &expected_call,
             &expected_exchange_obj,
-            &self.callsign_input.trim().to_uppercase(),
+            &entered_callsign,
             &entered_exchange,
         );
 
         let result = QsoResult {
-            callsign: self.callsign_input.trim().to_uppercase(),
+            callsign: entered_callsign.clone(),
             expected_call: expected_call.clone(),
-            expected_exchange: expected_exchange_str,
+            expected_exchange: expected_exchange_str.clone(),
             callsign_correct: validation.callsign_correct,
             exchange_correct: validation.exchange_correct,
             points: validation.points,
         };
+
+        // Log QSO to session stats
+        self.session_stats.log_qso(QsoRecord {
+            expected_callsign: expected_call.clone(),
+            entered_callsign,
+            callsign_correct: validation.callsign_correct,
+            expected_exchange: expected_exchange_str,
+            entered_exchange,
+            exchange_correct: validation.exchange_correct,
+            station_wpm,
+            points: validation.points,
+        });
 
         // Update score
         self.score.add_qso(validation.points);
@@ -842,6 +863,11 @@ impl eframe::App for ContestApp {
                     }
                 },
             );
+        }
+
+        // Stats window (separate OS window)
+        if self.show_stats {
+            render_stats_window(ctx, &self.session_stats, &mut self.show_stats);
         }
 
         // Main content

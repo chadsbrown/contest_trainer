@@ -7,6 +7,7 @@ mod config;
 mod contest;
 mod messages;
 mod station;
+mod stats;
 mod ui;
 
 use app::ContestApp;

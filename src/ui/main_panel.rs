@@ -47,6 +47,7 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     ui.horizontal(|ui| {
         if ui.button("Reset Stats").clicked() {
             app.reset_score();
+            app.session_stats.clear();
         }
 
         ui.add_space(10.0);
@@ -58,6 +59,12 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
         };
         if ui.button(noise_label).clicked() {
             app.toggle_noise();
+        }
+
+        ui.add_space(10.0);
+
+        if ui.button("Session Stats").clicked() {
+            app.show_stats = !app.show_stats;
         }
     });
 }
