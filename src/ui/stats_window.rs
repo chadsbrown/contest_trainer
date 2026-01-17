@@ -6,7 +6,7 @@ pub fn render_stats_window(ctx: &egui::Context, stats: &SessionStats, show_stats
         egui::ViewportId::from_hash_of("stats_viewport"),
         egui::ViewportBuilder::default()
             .with_title("Session Statistics")
-            .with_inner_size([450.0, 500.0]),
+            .with_inner_size([450.0, 550.0]),
         |ctx, _class| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_stats_content(ui, stats);
@@ -35,10 +35,17 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
                 ui.label(format!("{}", analysis.total_qsos));
                 ui.end_row();
 
+                ui.label("Correct QSOs:");
+                ui.label(format!(
+                    "{} ({:.1}%)",
+                    analysis.correct_qsos, analysis.correct_rate
+                ));
+                ui.end_row();
+
                 ui.label("Perfect QSOs:");
                 ui.label(format!(
                     "{} ({:.1}%)",
-                    analysis.perfect_qsos, analysis.overall_accuracy
+                    analysis.perfect_qsos, analysis.perfect_rate
                 ));
                 ui.end_row();
 
@@ -46,6 +53,13 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
                 ui.label(format!("{}", analysis.total_points));
                 ui.end_row();
             });
+
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Perfect = correct without using AGN")
+                .small()
+                .italics(),
+        );
 
         ui.add_space(16.0);
         ui.separator();
@@ -71,6 +85,37 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
                     "{}/{} ({:.1}%)",
                     analysis.correct_exchanges, analysis.total_qsos, analysis.exchange_accuracy
                 ));
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        // AGN Usage section
+        ui.heading("AGN Usage");
+        ui.add_space(8.0);
+
+        egui::Grid::new("agn_grid")
+            .num_columns(2)
+            .spacing([40.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("Callsign AGN:");
+                ui.label(format!("{}", analysis.agn_callsign_count));
+                ui.end_row();
+
+                ui.label("Exchange AGN:");
+                ui.label(format!("{}", analysis.agn_exchange_count));
+                ui.end_row();
+
+                ui.label("Total with AGN:");
+                if analysis.total_qsos > 0 {
+                    let agn_pct =
+                        (analysis.agn_any_count as f32 / analysis.total_qsos as f32) * 100.0;
+                    ui.label(format!("{} ({:.1}%)", analysis.agn_any_count, agn_pct));
+                } else {
+                    ui.label("0");
+                }
                 ui.end_row();
             });
 
@@ -156,12 +201,13 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
             ui.label("No QSOs logged yet");
         } else {
             egui::Grid::new("qso_grid")
-                .num_columns(4)
-                .spacing([15.0, 4.0])
+                .num_columns(5)
+                .spacing([12.0, 4.0])
                 .show(ui, |ui| {
                     ui.label(RichText::new("Callsign").strong());
                     ui.label(RichText::new("Exchange").strong());
                     ui.label(RichText::new("WPM").strong());
+                    ui.label(RichText::new("AGN").strong());
                     ui.label(RichText::new("Result").strong());
                     ui.end_row();
 
@@ -194,21 +240,44 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
                         // WPM column
                         ui.label(format!("{}", qso.station_wpm));
 
+                        // AGN column
+                        let agn_used = qso.used_agn_callsign || qso.used_agn_exchange;
+                        if agn_used {
+                            let mut agn_parts = Vec::new();
+                            if qso.used_agn_callsign {
+                                agn_parts.push("C");
+                            }
+                            if qso.used_agn_exchange {
+                                agn_parts.push("X");
+                            }
+                            ui.label(
+                                RichText::new(agn_parts.join(",")).color(egui::Color32::YELLOW),
+                            );
+                        } else {
+                            ui.label("-");
+                        }
+
                         // Result column
-                        let result_text = if qso.callsign_correct && qso.exchange_correct {
-                            "OK"
+                        let is_correct = qso.callsign_correct && qso.exchange_correct;
+                        let is_perfect = is_correct && !agn_used;
+                        let (result_text, result_color) = if is_perfect {
+                            ("OK", egui::Color32::GREEN)
+                        } else if is_correct {
+                            ("ok", egui::Color32::LIGHT_GREEN)
                         } else {
-                            "ERR"
-                        };
-                        let result_color = if qso.callsign_correct && qso.exchange_correct {
-                            egui::Color32::GREEN
-                        } else {
-                            egui::Color32::RED
+                            ("ERR", egui::Color32::RED)
                         };
                         ui.label(RichText::new(result_text).color(result_color));
                         ui.end_row();
                     }
                 });
+
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("AGN: C=callsign, X=exchange | OK=perfect, ok=correct with AGN")
+                    .small()
+                    .italics(),
+            );
         }
     });
 }

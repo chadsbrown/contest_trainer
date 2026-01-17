@@ -141,6 +141,10 @@ pub struct ContestApp {
     // Session statistics
     pub session_stats: SessionStats,
     pub show_stats: bool,
+
+    // AGN usage tracking for current QSO
+    used_agn_callsign: bool,
+    used_agn_exchange: bool,
 }
 
 impl ContestApp {
@@ -200,6 +204,8 @@ impl ContestApp {
             saved_noise_level,
             session_stats: SessionStats::new(),
             show_stats: false,
+            used_agn_callsign: false,
+            used_agn_exchange: false,
         }
     }
 
@@ -241,6 +247,10 @@ impl ContestApp {
             .send(AudioCommand::PlayUserMessage { message, wpm });
 
         self.state = ContestState::CallingCq;
+
+        // Reset AGN tracking for new QSO
+        self.used_agn_callsign = false;
+        self.used_agn_exchange = false;
     }
 
     fn send_exchange(&mut self, their_call: &str) {
@@ -417,6 +427,8 @@ impl ContestApp {
             exchange_correct: validation.exchange_correct,
             station_wpm,
             points: validation.points,
+            used_agn_callsign: self.used_agn_callsign,
+            used_agn_exchange: self.used_agn_exchange,
         });
 
         // Update score
@@ -453,6 +465,7 @@ impl ContestApp {
         });
 
         self.state = ContestState::SendingAgn { caller };
+        self.used_agn_exchange = true;
     }
 
     fn handle_callsign_agn_request(&mut self) {
@@ -473,6 +486,7 @@ impl ContestApp {
         });
 
         self.state = ContestState::SendingCallsignAgn { callers };
+        self.used_agn_callsign = true;
     }
 
     fn process_audio_events(&mut self) {
