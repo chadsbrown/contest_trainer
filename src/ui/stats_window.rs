@@ -79,7 +79,7 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
         ui.add_space(8.0);
 
         // WPM section
-        ui.heading("Station Speed");
+        ui.heading("Calling Station Speed");
         ui.add_space(8.0);
 
         if analysis.total_qsos > 0 {
