@@ -130,7 +130,11 @@ impl SessionStats {
             .filter(|(_, _, total)| *total >= 3) // Only show chars with enough samples
             .collect();
 
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Sort by error rate descending, then by character ascending for stable ordering
+        results.sort_by(|a, b| match b.1.partial_cmp(&a.1) {
+            Some(std::cmp::Ordering::Equal) | None => a.0.cmp(&b.0),
+            Some(ord) => ord,
+        });
         results
     }
 
