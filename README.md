@@ -2,7 +2,8 @@
 
 A practice tool for amateur radio CW (Morse code) contest operators. Simulate realistic contest conditions and improve your copying and logging skills.
 
-![Screenshot](screenshot.png)
+![Screenshot](screenshots/screenshot.png)
+![Screenshot2](screenshots/screenshot2.png)
 
 ## Quickstart
 
@@ -31,6 +32,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 - **AGN Requests**: Use F8 to ask a station to repeat their exchange
 - **Similarity Matching**: Forgiving callsign entry that handles minor copying errors
 - **Score Tracking**: Track QSOs, points, and hourly rate
+- **Session Statistics**: Detailed performance analysis including accuracy rates, WPM statistics, and character-level error tracking
 - **Persistent Settings**: Your configuration is saved between sessions
 
 ## Downloads
@@ -46,9 +48,20 @@ Pre-built binaries for Windows, macOS (Intel and Apple Silicon), and Linux are a
 | F3 | Send TU (thank you) |
 | F5 | Query partial callsign (His Call) |
 | F8 | Request repeat (AGN?) |
+| F12 | Wipe (clear callsign and exchange fields) |
 | Enter | Submit current field / Send CQ if empty |
 | Tab | Switch between callsign and exchange fields |
+| Up Arrow | Increase your WPM |
+| Down Arrow | Decrease your WPM |
 | Esc | Clear inputs and stop audio |
+
+## UI Controls
+
+The main window includes several buttons at the bottom:
+
+- **Reset Stats**: Clear all QSO statistics and start fresh
+- **Toggle Static**: Enable/disable background noise
+- **Session Stats**: Open a detailed statistics window showing accuracy, WPM analysis, character error rates, and recent QSOs
 
 ## Settings
 
@@ -67,6 +80,7 @@ Access settings via File > Settings. The settings window opens as a separate win
 ### Contest Settings
 
 - **Contest Type**: Select from CQ World Wide, NA Sprint, ARRL Sweepstakes, or CWT
+- **CQ Message**: Your CQ message (default: "CQ TEST")
 - **Callsign File**: File containing callsigns for non-CWT contests
 - **CWT Callsign File**: File containing CWT stations with name/member data
 
