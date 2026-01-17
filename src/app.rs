@@ -55,6 +55,13 @@ pub enum ContestState {
         caller: ActiveCaller,
         wait_until: Instant,
     },
+    /// User requested AGN for callsign (cursor in callsign field)
+    SendingCallsignAgn { callers: Vec<ActiveCaller> },
+    /// Waiting for station(s) to resend callsign after AGN
+    WaitingForCallsignAgn {
+        callers: Vec<ActiveCaller>,
+        wait_until: Instant,
+    },
     /// QSO complete, showing result
     QsoComplete { result: QsoResult },
 }
@@ -448,6 +455,26 @@ impl ContestApp {
         self.state = ContestState::SendingAgn { caller };
     }
 
+    fn handle_callsign_agn_request(&mut self) {
+        // Only works when stations are calling
+        let callers = match &self.state {
+            ContestState::StationsCalling { callers } => callers.clone(),
+            _ => return,
+        };
+
+        // Stop any current station audio
+        let _ = self.cmd_tx.send(AudioCommand::StopAll);
+
+        // Send the AGN message
+        let agn_message = self.settings.user.agn_message.clone();
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
+            message: agn_message,
+            wpm: self.settings.user.wpm,
+        });
+
+        self.state = ContestState::SendingCallsignAgn { callers };
+    }
+
     fn process_audio_events(&mut self) {
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
@@ -495,6 +522,15 @@ impl ContestApp {
                             let caller = caller.clone();
                             let wait_until = Instant::now() + std::time::Duration::from_millis(250);
                             self.state = ContestState::WaitingForAgn { caller, wait_until };
+                        }
+                        ContestState::SendingCallsignAgn { callers } => {
+                            // AGN request sent, wait briefly before station(s) resend callsign
+                            let callers = callers.clone();
+                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                            self.state = ContestState::WaitingForCallsignAgn {
+                                callers,
+                                wait_until,
+                            };
                         }
                         _ => {}
                     }
@@ -576,6 +612,33 @@ impl ContestApp {
                 }));
 
                 self.state = ContestState::ReceivingExchange { caller };
+            }
+        }
+    }
+
+    fn check_waiting_for_callsign_agn(&mut self) {
+        if let ContestState::WaitingForCallsignAgn {
+            callers,
+            wait_until,
+        } = &self.state
+        {
+            if Instant::now() >= *wait_until {
+                let callers = callers.clone();
+
+                // Have station(s) resend their callsign
+                for caller in &callers {
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: caller.params.callsign.clone(),
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                    }));
+                }
+
+                // Go back to StationsCalling
+                self.state = ContestState::StationsCalling { callers };
             }
         }
     }
@@ -688,9 +751,14 @@ impl ContestApp {
                 self.handle_partial_query();
             }
 
-            // F8 - Request AGN (ask station to repeat exchange)
+            // F8 - Request AGN (ask station to repeat)
+            // In callsign field: ask station(s) to repeat callsign
+            // In exchange field: ask station to repeat exchange
             if i.key_pressed(Key::F8) {
-                self.handle_agn_request();
+                match self.current_field {
+                    InputField::Callsign => self.handle_callsign_agn_request(),
+                    InputField::Exchange => self.handle_agn_request(),
+                }
             }
 
             // F12 - Wipe (clear callsign and exchange fields)
@@ -817,6 +885,9 @@ impl eframe::App for ContestApp {
 
         // Check if waiting for AGN response
         self.check_waiting_for_agn();
+
+        // Check if waiting for callsign AGN response
+        self.check_waiting_for_callsign_agn();
 
         // Check if waiting for partial response
         self.check_waiting_for_partial_response();
