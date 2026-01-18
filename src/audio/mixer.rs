@@ -229,9 +229,12 @@ impl Mixer {
             *sample = 0.0;
         }
 
-        // Add noise
-        self.noise
-            .fill_buffer(buffer, self.settings.noise_level, &self.settings.noise);
+        // Add noise (optionally muted while user is transmitting)
+        let mute_noise = self.settings.mute_noise_during_tx && self.user_station.is_some();
+        if !mute_noise {
+            self.noise
+                .fill_buffer(buffer, self.settings.noise_level, &self.settings.noise);
+        }
 
         // Mix each calling station
         for station in &mut self.stations {

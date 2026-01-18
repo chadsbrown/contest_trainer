@@ -317,6 +317,16 @@ pub fn render_settings_panel(
                     }
                 });
 
+                if ui
+                    .checkbox(
+                        &mut settings.audio.mute_noise_during_tx,
+                        "Mute background noise during TX",
+                    )
+                    .changed()
+                {
+                    *settings_changed = true;
+                }
+
                 ui.add_space(10.0);
                 ui.label(RichText::new("Static/QRN Settings").strong());
                 ui.separator();

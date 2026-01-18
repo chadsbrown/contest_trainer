@@ -34,8 +34,14 @@ pub struct AudioSettings {
     pub tone_frequency_hz: f32,
     pub noise_level: f32,
     pub master_volume: f32,
+    #[serde(default = "default_true")]
+    pub mute_noise_during_tx: bool,
     #[serde(default)]
     pub noise: NoiseSettings,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -106,6 +112,7 @@ impl Default for AudioSettings {
             tone_frequency_hz: 600.0,
             noise_level: 0.15,
             master_volume: 0.7,
+            mute_noise_during_tx: true,
             noise: NoiseSettings::default(),
         }
     }
