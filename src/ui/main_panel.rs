@@ -187,7 +187,7 @@ fn render_key_hints(ui: &mut egui::Ui) {
         ui.add_space(10.0);
 
         ui.label(RichText::new("F8").strong().monospace());
-        ui.label("AGN?");
+        ui.label("?");
         ui.add_space(10.0);
 
         ui.label(RichText::new("F12").strong().monospace());

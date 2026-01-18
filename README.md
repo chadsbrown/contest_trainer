@@ -23,6 +23,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 
 ## Features
 
+- **Multi-platform Support**: Run on Windows, macOS, and Linux
 - **Multiple Contest Types**: Practice for CQ World Wide, NA Sprint, ARRL Sweepstakes, and CWT contests
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
 - **Multiple Simultaneous Callers**: Handle pileups with multiple stations calling at once
@@ -47,7 +48,7 @@ Pre-built binaries for Windows, macOS (Intel and Apple Silicon), and Linux are a
 | F2 | Send Exchange |
 | F3 | Send TU (thank you) |
 | F5 | Query partial callsign (His Call) |
-| F8 | Request repeat (AGN?) |
+| F8 | Request repeat (?) |
 | F12 | Wipe (clear callsign and exchange fields) |
 | Enter | Submit current field / Send CQ if empty |
 | Tab | Switch between callsign and exchange fields |
