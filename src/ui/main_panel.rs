@@ -133,7 +133,7 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
             Vec2::new(120.0, 24.0),
             egui::TextEdit::singleline(&mut app.callsign_input)
                 .font(egui::TextStyle::Monospace)
-                .hint_text("callsign"),
+                .hint_text("Callsign"),
         );
 
         if call_response.changed() {
@@ -151,7 +151,7 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
             Vec2::new(150.0, 24.0),
             egui::TextEdit::singleline(&mut app.exchange_input)
                 .font(egui::TextStyle::Monospace)
-                .hint_text("exchange"),
+                .hint_text("Exchange"),
         );
 
         if exch_response.changed() {
