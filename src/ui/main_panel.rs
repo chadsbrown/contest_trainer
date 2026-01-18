@@ -136,6 +136,10 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
                 .hint_text("callsign"),
         );
 
+        if call_response.changed() {
+            app.callsign_input = app.callsign_input.to_uppercase();
+        }
+
         if app.current_field == InputField::Callsign && !app.show_settings {
             call_response.request_focus();
         }
@@ -149,6 +153,10 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
                 .font(egui::TextStyle::Monospace)
                 .hint_text("exchange"),
         );
+
+        if exch_response.changed() {
+            app.exchange_input = app.exchange_input.to_uppercase();
+        }
 
         if app.current_field == InputField::Exchange && !app.show_settings {
             exch_response.request_focus();
