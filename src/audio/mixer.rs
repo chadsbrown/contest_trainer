@@ -2,6 +2,7 @@ use super::morse::{text_to_morse, MorseElement, MorseTimer, ToneGenerator};
 use super::noise::NoiseGenerator;
 use crate::config::AudioSettings;
 use crate::messages::{StationId, StationParams};
+use rand::Rng;
 
 /// State for an active station being rendered
 pub struct ActiveStation {
@@ -268,9 +269,13 @@ impl Mixer {
             }
         }
 
-        // Apply master volume and soft clipping
+        // Apply master volume, dither, and soft clipping
+        let mut rng = rand::thread_rng();
         for sample in buffer.iter_mut() {
             *sample *= self.settings.master_volume;
+            // Add very small triangular dither to prevent audio artifacts
+            let dither = (rng.gen::<f32>() - 0.5) * 0.001;
+            *sample += dither;
             // Soft clipping using tanh
             if sample.abs() > 0.8 {
                 *sample = sample.signum() * (0.8 + 0.2 * ((*sample).abs() - 0.8).tanh());
