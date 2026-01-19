@@ -18,6 +18,8 @@ pub struct UserSettings {
     pub wpm: u8,
     pub font_size: f32,
     pub agn_message: String,
+    #[serde(default = "default_true")]
+    pub show_status_line: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -92,6 +94,7 @@ impl Default for UserSettings {
             wpm: 32,
             font_size: 14.0,
             agn_message: "?".to_string(),
+            show_status_line: true,
         }
     }
 }

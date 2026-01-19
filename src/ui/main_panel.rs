@@ -18,9 +18,10 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     ui.add_space(8.0);
 
     // Status indicator
-    render_status(ui, &app.state);
-
-    ui.add_space(12.0);
+    if app.settings.user.show_status_line {
+        render_status(ui, &app.state);
+        ui.add_space(12.0);
+    }
 
     // Input fields
     render_input_fields(ui, app);

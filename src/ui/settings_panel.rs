@@ -84,6 +84,13 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                if ui
+                    .checkbox(&mut settings.user.show_status_line, "Show Status Line")
+                    .changed()
+                {
+                    *settings_changed = true;
+                }
             });
 
         ui.add_space(8.0);
