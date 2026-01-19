@@ -67,6 +67,8 @@ pub struct SimulationSettings {
     pub frequency_spread_hz: f32,
     pub amplitude_min: f32,
     pub amplitude_max: f32,
+    #[serde(default)]
+    pub agn_request_probability: f32,
 }
 
 impl Default for AppSettings {
@@ -140,6 +142,7 @@ impl Default for SimulationSettings {
             frequency_spread_hz: 400.0,
             amplitude_min: 0.4,
             amplitude_max: 1.0,
+            agn_request_probability: 0.1,
         }
     }
 }

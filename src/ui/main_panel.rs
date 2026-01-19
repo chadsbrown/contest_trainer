@@ -114,6 +114,12 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
         ContestState::WaitingForCallsignAgn { .. } => {
             ("Waiting for repeat...", Color32::LIGHT_BLUE)
         }
+        ContestState::CallerRequestingAgn { .. } => {
+            ("Station requesting repeat...", Color32::YELLOW)
+        }
+        ContestState::WaitingForUserExchangeRepeat { .. } => {
+            ("Press F2 to resend exchange", Color32::GREEN)
+        }
         ContestState::QsoComplete { .. } => (
             "QSO logged! Press F1 for next CQ",
             Color32::from_rgb(100, 200, 100),

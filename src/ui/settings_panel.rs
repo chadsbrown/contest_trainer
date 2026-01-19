@@ -267,6 +267,25 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                ui.horizontal(|ui| {
+                    ui.label("Caller Needs Repeat Probability:");
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut settings.simulation.agn_request_probability,
+                                0.0..=1.0,
+                            )
+                            .fixed_decimals(2),
+                        )
+                        .on_hover_text(
+                            "Probability that a caller will request you repeat your exchange",
+                        )
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
             });
 
         ui.add_space(8.0);

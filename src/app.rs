@@ -62,6 +62,10 @@ pub enum ContestState {
         callers: Vec<ActiveCaller>,
         wait_until: Instant,
     },
+    /// Caller is requesting AGN (sending "AGN" or "?")
+    CallerRequestingAgn { caller: ActiveCaller },
+    /// Waiting for user to resend exchange after caller requested AGN
+    WaitingForUserExchangeRepeat { caller: ActiveCaller },
     /// QSO complete, showing result
     QsoComplete { result: QsoResult },
 }
@@ -501,6 +505,14 @@ impl ContestApp {
                             // Exchange received, user can now log
                         }
                     }
+
+                    // If caller was requesting AGN, transition to waiting for user to resend
+                    if let ContestState::CallerRequestingAgn { ref caller } = self.state {
+                        if caller.params.id == id {
+                            let caller = caller.clone();
+                            self.state = ContestState::WaitingForUserExchangeRepeat { caller };
+                        }
+                    }
                 }
                 AudioEvent::UserMessageComplete => {
                     match &self.state {
@@ -587,23 +599,43 @@ impl ContestApp {
     }
 
     fn check_waiting_to_send_exchange(&mut self) {
+        use rand::Rng;
+
         if let ContestState::WaitingToSendExchange { caller, wait_until } = &self.state {
             if Instant::now() >= *wait_until {
                 let caller = caller.clone();
 
-                // Have the station send only their exchange (not callsign again)
-                let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
+                // Randomly decide if the caller will request AGN
+                let mut rng = rand::thread_rng();
+                if rng.gen::<f32>() < self.settings.simulation.agn_request_probability {
+                    // Caller requests AGN - send "AGN" or "?"
+                    let agn_message = if rng.gen::<bool>() { "AGN" } else { "?" };
 
-                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                    id: caller.params.id,
-                    callsign: exchange_str,
-                    exchange: caller.params.exchange.clone(),
-                    frequency_offset_hz: caller.params.frequency_offset_hz,
-                    wpm: caller.params.wpm,
-                    amplitude: caller.params.amplitude,
-                }));
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: agn_message.to_string(),
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                    }));
 
-                self.state = ContestState::ReceivingExchange { caller };
+                    self.state = ContestState::CallerRequestingAgn { caller };
+                } else {
+                    // Normal flow - have the station send only their exchange (not callsign again)
+                    let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
+
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: exchange_str,
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                    }));
+
+                    self.state = ContestState::ReceivingExchange { caller };
+                }
             }
         }
     }
@@ -735,7 +767,18 @@ impl ContestApp {
 
             // F2 - Send Exchange (uses callsign from input field if available)
             if i.key_pressed(Key::F2) {
-                if let ContestState::StationsCalling { ref callers } = self.state {
+                // Handle resending exchange when caller requested AGN
+                if let ContestState::WaitingForUserExchangeRepeat { ref caller } = self.state {
+                    let caller = caller.clone();
+                    let entered_call = self.callsign_input.trim().to_uppercase();
+                    let call_to_send = if !entered_call.is_empty() {
+                        entered_call
+                    } else {
+                        caller.params.callsign.clone()
+                    };
+                    self.send_exchange(&call_to_send);
+                    self.state = ContestState::SendingExchange { caller };
+                } else if let ContestState::StationsCalling { ref callers } = self.state {
                     let entered_call = self.callsign_input.trim().to_uppercase();
                     // Use entered callsign if it matches a caller, otherwise use first caller
                     let callsign = if !entered_call.is_empty() {
