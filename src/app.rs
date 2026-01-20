@@ -595,6 +595,10 @@ impl ContestApp {
             callers.push(ActiveCaller { params });
         }
 
+        // Reset AGN tracking for new QSO (this is a new QSO without F1/CQ)
+        self.used_agn_callsign = false;
+        self.used_agn_exchange = false;
+
         self.state = ContestState::StationsCalling { callers };
     }
 
