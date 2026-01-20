@@ -279,6 +279,23 @@ impl ContestApp {
             .send(AudioCommand::PlayUserMessage { message, wpm });
     }
 
+    fn send_exchange_only(&mut self) {
+        let exchange = self.contest.user_exchange(
+            &self.settings.user.callsign,
+            self.user_serial,
+            self.settings.user.zone,
+            &self.settings.user.section,
+            &self.settings.user.name,
+        );
+
+        let wpm = self.settings.user.wpm;
+
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
+            message: exchange,
+            wpm,
+        });
+    }
+
     fn send_tu(&mut self) {
         let message = format!("TU {}", self.settings.user.callsign);
         let wpm = self.settings.user.wpm;
@@ -804,13 +821,7 @@ impl ContestApp {
                 // Handle resending exchange when caller requested AGN
                 if let ContestState::WaitingForUserExchangeRepeat { ref caller } = self.state {
                     let caller = caller.clone();
-                    let entered_call = self.callsign_input.trim().to_uppercase();
-                    let call_to_send = if !entered_call.is_empty() {
-                        entered_call
-                    } else {
-                        caller.params.callsign.clone()
-                    };
-                    self.send_exchange(&call_to_send);
+                    self.send_exchange_only();
                     self.state = ContestState::SendingExchange { caller };
                 } else if let ContestState::StationsCalling { ref callers } = self.state {
                     let entered_call = self.callsign_input.trim().to_uppercase();
