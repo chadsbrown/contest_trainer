@@ -68,6 +68,11 @@ pub enum ContestState {
     WaitingForUserExchangeRepeat { caller: ActiveCaller },
     /// QSO complete, showing result
     QsoComplete { result: QsoResult },
+    /// Brief pause before tail-ender starts calling
+    WaitingForTailEnder {
+        callers: Vec<ActiveCaller>,
+        wait_until: Instant,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -588,10 +593,9 @@ impl ContestApp {
             return;
         }
 
-        // Spawn the tail-ender(s)
+        // Prepare the tail-ender(s) but delay before they start calling
         let mut callers = Vec::new();
         for params in new_stations {
-            let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
             callers.push(ActiveCaller { params });
         }
 
@@ -599,7 +603,33 @@ impl ContestApp {
         self.used_agn_callsign = false;
         self.used_agn_exchange = false;
 
-        self.state = ContestState::StationsCalling { callers };
+        // Wait 100ms before the tail-ender starts calling
+        let wait_until = Instant::now() + std::time::Duration::from_millis(100);
+        self.state = ContestState::WaitingForTailEnder {
+            callers,
+            wait_until,
+        };
+    }
+
+    fn check_waiting_for_tail_ender(&mut self) {
+        if let ContestState::WaitingForTailEnder {
+            callers,
+            wait_until,
+        } = &self.state
+        {
+            if Instant::now() >= *wait_until {
+                let callers = callers.clone();
+
+                // Now start the audio for the tail-ender(s)
+                for caller in &callers {
+                    let _ = self
+                        .cmd_tx
+                        .send(AudioCommand::StartStation(caller.params.clone()));
+                }
+
+                self.state = ContestState::StationsCalling { callers };
+            }
+        }
     }
 
     fn check_waiting_to_send_exchange(&mut self) {
@@ -952,6 +982,9 @@ impl eframe::App for ContestApp {
 
         // Check if waiting for partial response
         self.check_waiting_for_partial_response();
+
+        // Check if waiting for tail-ender
+        self.check_waiting_for_tail_ender();
 
         // Handle keyboard input
         self.handle_keyboard(ctx);

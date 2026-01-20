@@ -125,6 +125,10 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
             "QSO logged! Press F1 for next CQ",
             Color32::from_rgb(100, 200, 100),
         ),
+        ContestState::WaitingForTailEnder { .. } => (
+            "QSO logged! Press F1 for next CQ",
+            Color32::from_rgb(100, 200, 100),
+        ),
     };
 
     ui.horizontal(|ui| {
