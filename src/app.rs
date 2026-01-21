@@ -1,5 +1,6 @@
 use crossbeam_channel::{bounded, Receiver, Sender};
 use egui::Key;
+use egui_file_dialog::FileDialog;
 use std::time::Instant;
 
 use crate::audio::AudioEngine;
@@ -10,7 +11,7 @@ use crate::cty::CtyDat;
 use crate::messages::{AudioCommand, AudioEvent, StationParams};
 use crate::station::{CallsignPool, CwtCallsignPool, StationSpawner};
 use crate::stats::{QsoRecord, SessionStats};
-use crate::ui::{render_main_panel, render_settings_panel, render_stats_window};
+use crate::ui::{render_main_panel, render_settings_panel, render_stats_window, FileDialogTarget};
 
 /// Which input field is active
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -156,6 +157,10 @@ pub struct ContestApp {
     // AGN usage tracking for current QSO
     used_agn_callsign: bool,
     used_agn_exchange: bool,
+
+    // File dialog for settings
+    file_dialog: FileDialog,
+    file_dialog_target: Option<FileDialogTarget>,
 }
 
 impl ContestApp {
@@ -222,6 +227,8 @@ impl ContestApp {
             show_stats: false,
             used_agn_callsign: false,
             used_agn_exchange: false,
+            file_dialog: FileDialog::new(),
+            file_dialog_target: None,
         }
     }
 
@@ -1038,6 +1045,8 @@ impl eframe::App for ContestApp {
             let settings = &mut self.settings;
             let settings_changed = &mut self.settings_changed;
             let show_settings = &mut self.show_settings;
+            let file_dialog = &mut self.file_dialog;
+            let file_dialog_target = &mut self.file_dialog_target;
 
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("settings_viewport"),
@@ -1045,8 +1054,35 @@ impl eframe::App for ContestApp {
                     .with_title("Settings")
                     .with_inner_size([475.0, 600.0]),
                 |ctx, _class| {
+                    // Update file dialog
+                    file_dialog.update(ctx);
+
+                    // Check if a file was picked
+                    if let Some(path) = file_dialog.take_picked() {
+                        if let Some(path_str) = path.to_str() {
+                            match file_dialog_target {
+                                Some(FileDialogTarget::CallsignFile) => {
+                                    settings.contest.callsign_file = path_str.to_string();
+                                    *settings_changed = true;
+                                }
+                                Some(FileDialogTarget::CwtCallsignFile) => {
+                                    settings.contest.cwt_callsign_file = path_str.to_string();
+                                    *settings_changed = true;
+                                }
+                                None => {}
+                            }
+                            *file_dialog_target = None;
+                        }
+                    }
+
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        render_settings_panel(ui, settings, settings_changed);
+                        render_settings_panel(
+                            ui,
+                            settings,
+                            settings_changed,
+                            file_dialog,
+                            file_dialog_target,
+                        );
                     });
 
                     if ctx.input(|i| i.viewport().close_requested()) {

@@ -1,11 +1,21 @@
 use crate::config::AppSettings;
 use crate::contest::ContestType;
 use egui::RichText;
+use egui_file_dialog::FileDialog;
+
+/// Tracks which file field triggered the file dialog
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FileDialogTarget {
+    CallsignFile,
+    CwtCallsignFile,
+}
 
 pub fn render_settings_panel(
     ui: &mut egui::Ui,
     settings: &mut AppSettings,
     settings_changed: &mut bool,
+    file_dialog: &mut FileDialog,
+    file_dialog_target: &mut Option<FileDialogTarget>,
 ) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         // User Settings
@@ -149,22 +159,28 @@ pub fn render_settings_panel(
 
                 ui.horizontal(|ui| {
                     ui.label("Callsign File:");
-                    if ui
-                        .text_edit_singleline(&mut settings.contest.callsign_file)
-                        .changed()
-                    {
-                        *settings_changed = true;
+                    ui.add(
+                        egui::TextEdit::singleline(&mut settings.contest.callsign_file)
+                            .interactive(false)
+                            .desired_width(250.0),
+                    );
+                    if ui.button("Browse...").clicked() {
+                        *file_dialog_target = Some(FileDialogTarget::CallsignFile);
+                        file_dialog.pick_file();
                     }
                 });
 
                 if settings.contest.contest_type == ContestType::Cwt {
                     ui.horizontal(|ui| {
                         ui.label("CWT Callsign File:");
-                        if ui
-                            .text_edit_singleline(&mut settings.contest.cwt_callsign_file)
-                            .changed()
-                        {
-                            *settings_changed = true;
+                        ui.add(
+                            egui::TextEdit::singleline(&mut settings.contest.cwt_callsign_file)
+                                .interactive(false)
+                                .desired_width(250.0),
+                        );
+                        if ui.button("Browse...").clicked() {
+                            *file_dialog_target = Some(FileDialogTarget::CwtCallsignFile);
+                            file_dialog.pick_file();
                         }
                     });
                 }

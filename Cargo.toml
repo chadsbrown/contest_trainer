@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 eframe = "0.33"
 egui = "0.33"
+egui-file-dialog = "0.12"
 cpal = "0.15"
 crossbeam-channel = "0.5"
 dirs = "5"
