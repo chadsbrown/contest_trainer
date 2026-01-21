@@ -14,8 +14,8 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
    - Linux: `contest_trainer-linux-x86_64`
 
 2. **Download the callsign files** from this repository (right click, save as) and place them in the same directory as the binary:
-   - [`callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/callsigns.txt) - for non-CWT contests
-   - [`cwt_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/cwt_callsigns.txt) - for CWT contest
+   - [`callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/callsigns.txt) - for non-CWT contests (this is just a copy of SCP)
+   - [`cwt_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/cwt_callsigns.txt) - for CWT contest (this is just a copy of the history file for CWT from N1MM+)
 
 3. **Run the application** 
 4. **Personalize settings** (File->Settings) to configure your callsign, name and exchange info.
