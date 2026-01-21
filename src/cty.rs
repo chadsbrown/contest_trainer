@@ -17,6 +17,7 @@ struct PrefixEntry {
     cq_zone: u8,
     itu_zone: u8,
     is_exact: bool, // true if this is an exact callsign match (prefixed with =)
+    country_prefix: String, // the primary prefix for the country this entry belongs to
 }
 
 /// CTY.DAT database for callsign lookups
@@ -134,6 +135,7 @@ impl CtyDat {
                 cq_zone: cq_override.unwrap_or(entity.cq_zone),
                 itu_zone: itu_override.unwrap_or(entity.itu_zone),
                 is_exact,
+                country_prefix: entity.primary_prefix.to_uppercase(),
             };
 
             if is_exact {
@@ -271,15 +273,15 @@ impl CtyDat {
     pub fn lookup_prefix(&self, callsign: &str) -> Option<String> {
         let call = callsign.to_uppercase();
 
-        // First try exact match - return the callsign itself as the "prefix"
-        if self.exact_calls.contains_key(&call) {
-            return Some(call);
+        // First try exact match - return the country prefix, not the callsign
+        if let Some(entry) = self.exact_calls.get(&call) {
+            return Some(entry.country_prefix.clone());
         }
 
         // Then try longest prefix match
-        for (prefix, _) in &self.prefixes {
+        for (prefix, entry) in &self.prefixes {
             if call.starts_with(prefix) {
-                return Some(prefix.clone());
+                return Some(entry.country_prefix.clone());
             }
         }
 
@@ -398,5 +400,33 @@ Germany:                  14:  28:  EU:   51.00:   -10.00:    -1.0:  DL:
         assert_eq!(cty.lookup_cq_zone("DL1ABC"), Some(14)); // Germany
         assert_eq!(cty.lookup_cq_zone("JA1ABC"), Some(25)); // Japan
         assert_eq!(cty.lookup_cq_zone("VK2ABC"), Some(30)); // Australia
+    }
+
+    #[test]
+    fn test_same_country() {
+        let content = r#"
+United States:            05:  08:  NA:   37.60:    91.87:     5.0:  K:
+    K,W,N,AA,
+    K0(4)[7],W0(4)[7],N0(4)[7],
+    K6(3)[6],W6(3)[6],N6(3)[6],
+    =W1AW(5)[8];
+Germany:                  14:  28:  EU:   51.00:   -10.00:    -1.0:  DL:
+    DA,DB,DC,DD,DE,DF,DG,DH,DI,DJ,DK,DL,DM,DN,DO,DP,DQ,DR;
+"#;
+        let cty = CtyDat::parse(content);
+
+        // Two regular US callsigns should be same country
+        assert!(cty.same_country("K1ABC", "W2XYZ"));
+
+        // Exact match callsign (W1AW) should match regular US callsigns
+        assert!(cty.same_country("W1AW", "K1ABC"));
+        assert!(cty.same_country("K2XYZ", "W1AW"));
+
+        // US and German callsigns should not be same country
+        assert!(!cty.same_country("K1ABC", "DL1ABC"));
+        assert!(!cty.same_country("W1AW", "DL1ABC"));
+
+        // Two German callsigns should be same country
+        assert!(cty.same_country("DL1ABC", "DK2XYZ"));
     }
 }

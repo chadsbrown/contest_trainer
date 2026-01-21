@@ -72,12 +72,8 @@ pub struct SimulationSettings {
     #[serde(default)]
     pub agn_request_probability: f32,
     /// Probability of a caller being from the same country as the user (0.0 - 1.0)
-    #[serde(default = "default_same_country_probability")]
+    #[serde(default)]
     pub same_country_probability: f32,
-}
-
-fn default_same_country_probability() -> f32 {
-    0.1 // 10% chance of same-country caller by default
 }
 
 impl Default for AppSettings {
@@ -153,7 +149,7 @@ impl Default for SimulationSettings {
             amplitude_min: 0.4,
             amplitude_max: 1.0,
             agn_request_probability: 0.1,
-            same_country_probability: default_same_country_probability(),
+            same_country_probability: 0.1,
         }
     }
 }
