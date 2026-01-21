@@ -121,8 +121,8 @@ impl Default for ContestSettings {
     fn default() -> Self {
         Self {
             contest_type: ContestType::Cwt,
-            callsign_file: "data/callsigns.txt".to_string(),
-            cwt_callsign_file: "data/cwt_callsigns.txt".to_string(),
+            callsign_file: "callsigns.txt".to_string(),
+            cwt_callsign_file: "cwt_callsigns.txt".to_string(),
             cq_message: "CQ TEST".to_string(),
         }
     }

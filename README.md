@@ -24,7 +24,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 ## Features
 
 - **Multi-platform Support**: Run on Windows, macOS, and Linux
-- **Multiple Contest Types**: Practice for CWT (default), CQ World Wide, NA Sprint, ARRL Sweepstakes
+- **Multiple Contest Types**: Practice for CWT (default), and CQ World Wide (NA Sprint, ARRL Sweepstakes planned)
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
 - **Multiple Simultaneous Callers**: Handle pileups with multiple stations calling at once
 - **Background Noise**: Adjustable noise level to simulate real band conditions
