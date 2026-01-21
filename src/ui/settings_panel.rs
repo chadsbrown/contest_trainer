@@ -477,6 +477,53 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                ui.add_space(10.0);
+                ui.label(RichText::new("QSB (Fading) Settings").strong());
+                ui.separator();
+
+                if ui
+                    .checkbox(&mut settings.audio.qsb.enabled, "Enable QSB")
+                    .on_hover_text("Simulate signal fading on caller signals")
+                    .changed()
+                {
+                    *settings_changed = true;
+                }
+
+                if settings.audio.qsb.enabled {
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0); // indent
+                        ui.label("Fade Depth:");
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.audio.qsb.depth, 0.0..=1.0)
+                                    .fixed_decimals(2),
+                            )
+                            .on_hover_text(
+                                "How much the signal fades (0 = none, 1 = full fade to silence)",
+                            )
+                            .changed()
+                        {
+                            *settings_changed = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0); // indent
+                        ui.label("Fade Rate:");
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.audio.qsb.rate, 1.0..=20.0)
+                                    .fixed_decimals(1)
+                                    .suffix(" cpm"),
+                            )
+                            .on_hover_text("Fading cycles per minute (higher = faster fading)")
+                            .changed()
+                        {
+                            *settings_changed = true;
+                        }
+                    });
+                }
             });
     });
 }

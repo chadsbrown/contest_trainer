@@ -1,8 +1,91 @@
 use super::morse::{text_to_morse, MorseElement, MorseTimer, ToneGenerator};
 use super::noise::NoiseGenerator;
-use crate::config::AudioSettings;
+use crate::config::{AudioSettings, QsbSettings};
 use crate::messages::{StationId, StationParams};
 use rand::Rng;
+
+/// QSB (fading) oscillator that produces natural-sounding signal fading
+/// Uses multiple layered sine waves with different periods for a non-repetitive pattern
+pub struct QsbOscillator {
+    /// Phase accumulators for each oscillator layer (in radians)
+    phases: [f32; 3],
+    /// Angular velocities for each layer (radians per sample)
+    velocities: [f32; 3],
+    /// Depth of fading (0.0 = none, 1.0 = full fade to silence)
+    depth: f32,
+    /// Whether QSB is enabled
+    enabled: bool,
+}
+
+impl QsbOscillator {
+    pub fn new(sample_rate: u32, settings: &QsbSettings) -> Self {
+        let mut rng = rand::thread_rng();
+
+        // Convert cycles per minute to radians per sample
+        // base_rate is cycles/minute, we need radians/sample
+        // radians/sample = (cycles/minute) * (2π radians/cycle) * (1 minute/60 seconds) * (1 second/sample_rate samples)
+        let base_angular_velocity =
+            settings.rate * 2.0 * std::f32::consts::PI / 60.0 / sample_rate as f32;
+
+        // Create three oscillators with different rates for natural variation
+        // Rates are roughly 1x, 0.7x, and 1.3x the base rate, with some randomness
+        let velocities = [
+            base_angular_velocity * (0.9 + rng.gen::<f32>() * 0.2),
+            base_angular_velocity * (0.6 + rng.gen::<f32>() * 0.2),
+            base_angular_velocity * (1.2 + rng.gen::<f32>() * 0.2),
+        ];
+
+        // Random starting phases so each station sounds different
+        let phases = [
+            rng.gen::<f32>() * 2.0 * std::f32::consts::PI,
+            rng.gen::<f32>() * 2.0 * std::f32::consts::PI,
+            rng.gen::<f32>() * 2.0 * std::f32::consts::PI,
+        ];
+
+        Self {
+            phases,
+            velocities,
+            depth: settings.depth,
+            enabled: settings.enabled,
+        }
+    }
+
+    /// Get the current QSB amplitude factor (0.0 to 1.0) and advance the oscillator
+    pub fn next_factor(&mut self) -> f32 {
+        if !self.enabled {
+            return 1.0;
+        }
+
+        // Combine three sine waves with different weights
+        // This creates a complex, non-repeating pattern
+        let combined =
+            0.5 * self.phases[0].sin() + 0.3 * self.phases[1].sin() + 0.2 * self.phases[2].sin();
+
+        // combined ranges from -1.0 to 1.0, normalize to 0.0 to 1.0
+        let normalized = (combined + 1.0) / 2.0;
+
+        // Apply depth: at depth=0, always return 1.0; at depth=1, return full range
+        let factor = 1.0 - self.depth + self.depth * normalized;
+
+        // Advance all phases
+        for i in 0..3 {
+            self.phases[i] += self.velocities[i];
+            // Keep phases in reasonable range to avoid floating point issues
+            if self.phases[i] > 2.0 * std::f32::consts::PI {
+                self.phases[i] -= 2.0 * std::f32::consts::PI;
+            }
+        }
+
+        factor
+    }
+
+    /// Update settings (called when user changes QSB settings)
+    pub fn update_settings(&mut self, settings: &QsbSettings) {
+        self.depth = settings.depth;
+        self.enabled = settings.enabled;
+        // Note: we don't update velocities to avoid jarring changes mid-fade
+    }
+}
 
 /// State for an active station being rendered
 pub struct ActiveStation {
@@ -16,10 +99,17 @@ pub struct ActiveStation {
     pub timer: MorseTimer,
     pub amplitude: f32,
     pub completed: bool,
+    pub qsb: QsbOscillator,
 }
 
 impl ActiveStation {
-    pub fn new(params: &StationParams, message: &str, sample_rate: u32, center_freq: f32) -> Self {
+    pub fn new(
+        params: &StationParams,
+        message: &str,
+        sample_rate: u32,
+        center_freq: f32,
+        qsb_settings: &QsbSettings,
+    ) -> Self {
         let elements = text_to_morse(message);
         let timer = MorseTimer::new(sample_rate, params.wpm);
         let mut tone_generator =
@@ -43,6 +133,7 @@ impl ActiveStation {
             timer,
             amplitude: params.amplitude,
             completed: false,
+            qsb: QsbOscillator::new(sample_rate, qsb_settings),
         }
     }
 
@@ -56,13 +147,16 @@ impl ActiveStation {
 
         let element = self.elements[self.current_element_idx];
 
+        // Get QSB factor (always advances the oscillator to keep fading continuous)
+        let qsb_factor = self.qsb.next_factor();
+
         let sample = if element.is_tone() {
-            // Generate tone with envelope
+            // Generate tone with envelope and QSB
             let raw = self.tone_generator.next_sample();
             let envelope = self
                 .tone_generator
                 .envelope(self.samples_elapsed, self.samples_in_element);
-            raw * envelope * self.amplitude
+            raw * envelope * self.amplitude * qsb_factor
         } else {
             // Silence for gaps - but still advance the tone generator phase
             // to maintain phase continuity
@@ -190,6 +284,7 @@ impl Mixer {
             message,
             self.settings.sample_rate,
             self.settings.tone_frequency_hz,
+            &self.settings.qsb,
         );
         self.stations.push(station);
     }
@@ -211,6 +306,10 @@ impl Mixer {
 
     /// Update audio settings
     pub fn update_settings(&mut self, settings: AudioSettings) {
+        // Update QSB settings on all active stations
+        for station in &mut self.stations {
+            station.qsb.update_settings(&settings.qsb);
+        }
         self.settings = settings;
     }
 

@@ -40,6 +40,18 @@ pub struct AudioSettings {
     pub mute_noise_during_tx: bool,
     #[serde(default)]
     pub noise: NoiseSettings,
+    #[serde(default)]
+    pub qsb: QsbSettings,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct QsbSettings {
+    /// Whether QSB (fading) is enabled
+    pub enabled: bool,
+    /// Depth of fading (0.0 = none, 1.0 = full fade to silence)
+    pub depth: f32,
+    /// Average fading cycle rate in cycles per minute
+    pub rate: f32,
 }
 
 fn default_true() -> bool {
@@ -125,6 +137,7 @@ impl Default for AudioSettings {
             master_volume: 0.7,
             mute_noise_during_tx: true,
             noise: NoiseSettings::default(),
+            qsb: QsbSettings::default(),
         }
     }
 }
@@ -137,6 +150,16 @@ impl Default for NoiseSettings {
             pop_rate: 2.0,
             pop_intensity: 0.3,
             qrn_intensity: 0.2,
+        }
+    }
+}
+
+impl Default for QsbSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            depth: 0.8,
+            rate: 6.0, // 6 cycles per minute = 10 second period
         }
     }
 }
