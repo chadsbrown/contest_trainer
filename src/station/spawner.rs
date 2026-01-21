@@ -120,16 +120,20 @@ impl StationSpawner {
                 self.serial_counter += 1;
 
                 // Check if we should reject this callsign due to same-country
-                let should_reject = match (user_callsign, cty) {
-                    (Some(user_call), Some(cty_db)) => {
-                        if cty_db.same_country(user_call, &callsign) {
-                            // Same country - reject with (1 - same_country_probability)
-                            rng.gen::<f32>() > self.settings.same_country_probability
-                        } else {
-                            false
+                let should_reject = if self.settings.same_country_filter_enabled {
+                    match (user_callsign, cty) {
+                        (Some(user_call), Some(cty_db)) => {
+                            if cty_db.same_country(user_call, &callsign) {
+                                // Same country - reject with (1 - same_country_probability)
+                                rng.gen::<f32>() > self.settings.same_country_probability
+                            } else {
+                                false
+                            }
                         }
+                        _ => false, // No CTY data, don't reject
                     }
-                    _ => false, // No CTY data, don't reject
+                } else {
+                    false // Filter disabled, don't reject
                 };
 
                 if !should_reject {

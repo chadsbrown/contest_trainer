@@ -24,14 +24,13 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 ## Features
 
 - **Multi-platform Support**: Run on Windows, macOS, and Linux
-- **Multiple Contest Types**: Practice for CQ World Wide, NA Sprint, ARRL Sweepstakes, and CWT contests
+- **Multiple Contest Types**: Practice for CWT (default), CQ World Wide, NA Sprint, ARRL Sweepstakes
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
 - **Multiple Simultaneous Callers**: Handle pileups with multiple stations calling at once
 - **Background Noise**: Adjustable noise level to simulate real band conditions
 - **Tail-Ender Support**: Stations may call immediately after a QSO without waiting for your next CQ
 - **Partial Call Queries**: Use F5 to query a partial callsign when you can't copy the full call
-- **AGN Requests**: Use F8 to ask a station to repeat their exchange
-- **Similarity Matching**: Forgiving callsign entry that handles minor copying errors
+- **AGN Requests**: Use F8 to ask a station to repeat their exchange, or use F8 to have callers repeat callsigns
 - **Score Tracking**: Track QSOs, points, and hourly rate
 - **Session Statistics**: Detailed performance analysis including accuracy rates, WPM statistics, and character-level error tracking
 - **Persistent Settings**: Your configuration is saved between sessions
@@ -93,7 +92,8 @@ Access settings via File > Settings. The settings window opens as a separate win
 - **Frequency Spread**: Pitch variation between stations (Hz)
 - **Signal Strength Range**: Volume variation between stations
 - **Caller Needs Repeat Probability**: Chance that a caller will send "AGN" or "?" requesting you repeat your exchange
-- **Same Country Probability**: Controls how often callers are from your same DXCC country (0.0-1.0). Lower values mean more DX callers, higher values mean more domestic callers. Default is 0.1 (10% domestic). Uses cty.dat for country lookups based on callsign prefixes.
+- **Filter Callers by Country**: Enable/disable country-based caller filtering. When enabled, controls the mix of domestic vs DX callers
+- **Same Country Probability**: (Only shown when filter is enabled) Controls how often callers are from your same DXCC country (0.0-1.0). Lower values mean more DX callers, higher values mean more domestic callers. Default is 0.1 (10% domestic). Uses cty.dat for country lookups based on callsign prefixes.
 
 ### Audio Settings
 

@@ -71,6 +71,9 @@ pub struct SimulationSettings {
     pub amplitude_max: f32,
     #[serde(default)]
     pub agn_request_probability: f32,
+    /// Whether to filter callers based on country
+    #[serde(default)]
+    pub same_country_filter_enabled: bool,
     /// Probability of a caller being from the same country as the user (0.0 - 1.0)
     #[serde(default)]
     pub same_country_probability: f32,
@@ -149,6 +152,7 @@ impl Default for SimulationSettings {
             amplitude_min: 0.4,
             amplitude_max: 1.0,
             agn_request_probability: 0.1,
+            same_country_filter_enabled: false,
             same_country_probability: 0.1,
         }
     }

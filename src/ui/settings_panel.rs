@@ -310,24 +310,38 @@ pub fn render_settings_panel(
                     }
                 });
 
-                ui.horizontal(|ui| {
-                    ui.label("Same Country Probability:");
-                    if ui
-                        .add(
-                            egui::Slider::new(
-                                &mut settings.simulation.same_country_probability,
-                                0.0..=1.0,
+                if ui
+                    .checkbox(
+                        &mut settings.simulation.same_country_filter_enabled,
+                        "Filter Callers by Country",
+                    )
+                    .on_hover_text("When enabled, controls how often callers are from your country")
+                    .changed()
+                {
+                    *settings_changed = true;
+                }
+
+                if settings.simulation.same_country_filter_enabled {
+                    ui.horizontal(|ui| {
+                        ui.add_space(20.0); // indent
+                        ui.label("Same Country Probability:");
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut settings.simulation.same_country_probability,
+                                    0.0..=1.0,
+                                )
+                                .fixed_decimals(2),
                             )
-                            .fixed_decimals(2),
-                        )
-                        .on_hover_text(
-                            "Probability that a caller will be from the same country as you",
-                        )
-                        .changed()
-                    {
-                        *settings_changed = true;
-                    }
-                });
+                            .on_hover_text(
+                                "Probability that a caller will be from the same country as you",
+                            )
+                            .changed()
+                        {
+                            *settings_changed = true;
+                        }
+                    });
+                }
             });
 
         ui.add_space(8.0);
