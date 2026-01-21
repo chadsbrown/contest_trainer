@@ -92,6 +92,8 @@ Access settings via File > Settings. The settings window opens as a separate win
 - **WPM Range**: Speed range for calling stations
 - **Frequency Spread**: Pitch variation between stations (Hz)
 - **Signal Strength Range**: Volume variation between stations
+- **Caller Needs Repeat Probability**: Chance that a caller will send "AGN" or "?" requesting you repeat your exchange
+- **Same Country Probability**: Controls how often callers are from your same DXCC country (0.0-1.0). Lower values mean more DX callers, higher values mean more domestic callers. Default is 0.1 (10% domestic). Uses cty.dat for country lookups based on callsign prefixes.
 
 ### Audio Settings
 
