@@ -293,6 +293,25 @@ pub fn render_settings_panel(
                         *settings_changed = true;
                     }
                 });
+
+                ui.horizontal(|ui| {
+                    ui.label("Same Country Probability:");
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut settings.simulation.same_country_probability,
+                                0.0..=1.0,
+                            )
+                            .fixed_decimals(2),
+                        )
+                        .on_hover_text(
+                            "Probability that a caller will be from the same country as you",
+                        )
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
             });
 
         ui.add_space(8.0);

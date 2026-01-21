@@ -5,6 +5,7 @@ mod app;
 mod audio;
 mod config;
 mod contest;
+mod cty;
 mod messages;
 mod station;
 mod stats;

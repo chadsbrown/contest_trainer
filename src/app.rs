@@ -6,6 +6,7 @@ use crate::audio::AudioEngine;
 use crate::config::AppSettings;
 use crate::contest::ContestType;
 use crate::contest::{self, Contest};
+use crate::cty::CtyDat;
 use crate::messages::{AudioCommand, AudioEvent, StationParams};
 use crate::station::{CallsignPool, CwtCallsignPool, StationSpawner};
 use crate::stats::{QsoRecord, SessionStats};
@@ -135,6 +136,7 @@ pub struct ContestApp {
     contest: Box<dyn Contest>,
     spawner: StationSpawner,
     user_serial: u32,
+    cty: CtyDat,
 
     // UI state
     pub show_settings: bool,
@@ -178,6 +180,10 @@ impl ContestApp {
         // Create contest
         let contest = contest::create_contest(settings.contest.contest_type);
 
+        // Load CTY database for country lookups
+        let cty_data = include_str!("../data/cty.dat");
+        let cty = CtyDat::parse(cty_data);
+
         // Load callsigns and create spawner based on contest type
         let spawner = if settings.contest.contest_type == ContestType::Cwt {
             let cwt_callsigns = CwtCallsignPool::load(&settings.contest.cwt_callsign_file)
@@ -206,6 +212,7 @@ impl ContestApp {
             contest,
             spawner,
             user_serial: 1,
+            cty,
             show_settings: false,
             settings_changed: false,
             last_cq_finished: None,
@@ -602,7 +609,11 @@ impl ContestApp {
         }
 
         // Try to spawn a station
-        let new_stations = self.spawner.tick(self.contest.as_ref());
+        let new_stations = self.spawner.tick(
+            self.contest.as_ref(),
+            Some(&self.settings.user.callsign),
+            Some(&self.cty),
+        );
 
         if new_stations.is_empty() {
             // Couldn't spawn, go to idle
@@ -786,7 +797,11 @@ impl ContestApp {
         }
 
         // Try to spawn stations
-        let new_stations = self.spawner.tick(self.contest.as_ref());
+        let new_stations = self.spawner.tick(
+            self.contest.as_ref(),
+            Some(&self.settings.user.callsign),
+            Some(&self.cty),
+        );
 
         if !new_stations.is_empty() {
             let mut callers = Vec::new();

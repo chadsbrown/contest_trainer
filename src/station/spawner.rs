@@ -4,6 +4,7 @@ use std::time::Instant;
 use super::callsign::{CallsignPool, CwtCallsignPool};
 use crate::config::SimulationSettings;
 use crate::contest::{Contest, Exchange};
+use crate::cty::CtyDat;
 use crate::messages::{StationId, StationParams};
 
 /// Source of callsigns - either regular or CWT-specific
@@ -82,7 +83,15 @@ impl StationSpawner {
 
     /// Called each frame to potentially spawn new stations
     /// Returns a list of stations to spawn (may be empty or have multiple)
-    pub fn tick(&mut self, contest: &dyn Contest) -> Vec<StationParams> {
+    ///
+    /// If `user_callsign` and `cty` are provided, same-country callers will be
+    /// reduced based on the `same_country_probability` setting.
+    pub fn tick(
+        &mut self,
+        contest: &dyn Contest,
+        user_callsign: Option<&str>,
+        cty: Option<&CtyDat>,
+    ) -> Vec<StationParams> {
         let mut stations = Vec::new();
         let mut rng = rand::thread_rng();
 
@@ -98,12 +107,40 @@ impl StationSpawner {
                 break;
             }
 
-            // Pick a random callsign and get exchange
-            let Some((callsign, exchange)) = self.callsigns.random(contest, self.serial_counter)
-            else {
+            // Pick a random callsign and get exchange, with same-country rejection
+            let max_retries = 10;
+            let mut callsign_and_exchange = None;
+
+            for _ in 0..max_retries {
+                let Some((callsign, exchange)) =
+                    self.callsigns.random(contest, self.serial_counter)
+                else {
+                    break;
+                };
+                self.serial_counter += 1;
+
+                // Check if we should reject this callsign due to same-country
+                let should_reject = match (user_callsign, cty) {
+                    (Some(user_call), Some(cty_db)) => {
+                        if cty_db.same_country(user_call, &callsign) {
+                            // Same country - reject with (1 - same_country_probability)
+                            rng.gen::<f32>() > self.settings.same_country_probability
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false, // No CTY data, don't reject
+                };
+
+                if !should_reject {
+                    callsign_and_exchange = Some((callsign, exchange));
+                    break;
+                }
+            }
+
+            let Some((callsign, exchange)) = callsign_and_exchange else {
                 break;
             };
-            self.serial_counter += 1;
 
             // Random parameters within configured ranges
             let wpm = rng.gen_range(self.settings.wpm_min..=self.settings.wpm_max);
