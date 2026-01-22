@@ -166,7 +166,7 @@ Settings are stored in:
 
 This application was created collaboratively with [Claude](https://www.anthropic.com/claude) (Opus), an AI assistant by Anthropic.
 
-Special thanks to the following people, who contributed to the development of this application:
+Special thanks to the following people, who contributed feedback/ideas to the development of this application:
 - KD9UYC
 - DJ5CW
 
