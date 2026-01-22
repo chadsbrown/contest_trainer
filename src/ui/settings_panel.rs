@@ -380,6 +380,20 @@ pub fn render_settings_panel(
                 });
 
                 ui.horizontal(|ui| {
+                    ui.label("Noise Bandwidth (Hz):");
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.audio.noise_bandwidth, 100.0..=1000.0)
+                                .fixed_decimals(0),
+                        )
+                        .on_hover_text("Simulates receiver CW filter bandwidth")
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
                     ui.label("Master Volume:");
                     if ui
                         .add(

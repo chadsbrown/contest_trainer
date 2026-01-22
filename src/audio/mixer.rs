@@ -310,6 +310,9 @@ impl Mixer {
         for station in &mut self.stations {
             station.qsb.update_settings(&settings.qsb);
         }
+        // Update noise filter to match tone frequency and bandwidth
+        self.noise
+            .update_filter(settings.tone_frequency_hz, settings.noise_bandwidth);
         self.settings = settings;
     }
 

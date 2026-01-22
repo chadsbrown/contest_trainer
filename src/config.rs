@@ -38,6 +38,9 @@ pub struct AudioSettings {
     pub master_volume: f32,
     #[serde(default = "default_true")]
     pub mute_noise_during_tx: bool,
+    /// Noise filter bandwidth in Hz (simulates receiver CW filter)
+    #[serde(default = "default_noise_bandwidth")]
+    pub noise_bandwidth: f32,
     #[serde(default)]
     pub noise: NoiseSettings,
     #[serde(default)]
@@ -56,6 +59,10 @@ pub struct QsbSettings {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_noise_bandwidth() -> f32 {
+    400.0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -136,6 +143,7 @@ impl Default for AudioSettings {
             noise_level: 0.15,
             master_volume: 0.7,
             mute_noise_during_tx: true,
+            noise_bandwidth: 400.0,
             noise: NoiseSettings::default(),
             qsb: QsbSettings::default(),
         }

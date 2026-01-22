@@ -149,6 +149,11 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Default**: `0.15`
 - **Values**: 0.0-0.5
 
+### Noise Bandwidth (Hz)
+- **Purpose**: Simulates receiver CW filter bandwidth. Narrower values create more focused, resonant noise (like a tight CW filter); wider values create fuller, more broadband noise.
+- **Default**: `400` Hz
+- **Values**: 100-1000 Hz
+
 ### Master Volume
 - **Purpose**: Overall audio volume
 - **Default**: `0.7`
