@@ -129,6 +129,16 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
             "QSO logged! Press F1 for next CQ",
             Color32::from_rgb(100, 200, 100),
         ),
+        ContestState::SendingCallCorrection { .. } => {
+            ("Station correcting callsign...", Color32::YELLOW)
+        }
+        ContestState::WaitingToSendCallCorrection { .. } => {
+            ("Station correcting callsign...", Color32::YELLOW)
+        }
+        ContestState::WaitingForCallCorrection { .. } => {
+            ("Correct callsign and resend", Color32::GREEN)
+        }
+        ContestState::SendingExchangeWillCorrect { .. } => ("Sending exchange...", Color32::YELLOW),
     };
 
     ui.horizontal(|ui| {
