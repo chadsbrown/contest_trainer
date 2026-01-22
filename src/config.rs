@@ -140,10 +140,10 @@ impl Default for AudioSettings {
         Self {
             sample_rate: 44100,
             tone_frequency_hz: 600.0,
-            noise_level: 0.15,
+            noise_level: 0.25,
             master_volume: 0.7,
             mute_noise_during_tx: true,
-            noise_bandwidth: 400.0,
+            noise_bandwidth: 350.0,
             noise: NoiseSettings::default(),
             qsb: QsbSettings::default(),
         }
@@ -153,11 +153,11 @@ impl Default for AudioSettings {
 impl Default for NoiseSettings {
     fn default() -> Self {
         Self {
-            crash_rate: 0.3,
-            crash_intensity: 0.4,
-            pop_rate: 2.0,
-            pop_intensity: 0.3,
-            qrn_intensity: 0.2,
+            crash_rate: 0.4,
+            crash_intensity: 0.2,
+            pop_rate: 0.6,
+            pop_intensity: 0.73,
+            qrn_intensity: 0.4,
         }
     }
 }
@@ -166,8 +166,8 @@ impl Default for QsbSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            depth: 0.8,
-            rate: 6.0, // 6 cycles per minute = 10 second period
+            depth: 0.7,
+            rate: 4.0, // 6 cycles per minute = 10 second period
         }
     }
 }
