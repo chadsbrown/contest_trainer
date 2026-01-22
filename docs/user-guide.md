@@ -227,6 +227,46 @@ Opens a detailed statistics window showing:
 
 ---
 
+## Realism Behaviors
+
+The simulator includes several behaviors that model real contest operating conditions.
+
+### Call Correction
+
+When you enter the wrong callsign for a station, the calling station may or may not correct you:
+
+- **~80% of the time**: The station will send a correction
+- **~20% of the time**: The station will just proceed with the wrong call (you'll get a "busted call" penalty)
+
+When a station does correct you, they use one of two formats:
+- **~85% of corrections**: Send their callsign twice for emphasis (e.g., "W1ABC W1ABC")
+- **~15% of corrections**: Send their callsign once followed by their exchange (e.g., "W1ABC 5NN 123")
+
+A station will attempt to correct you up to 2 times before giving up.
+
+These behaviors are controlled by the `[simulation.call_correction]` settings.
+
+### Caller Persistence and Retry Behavior
+
+Stations in the pileup don't robotically call every single CQ. Each caller has a "patience" level (2-5 attempts) determining how many times they'll try before giving up.
+
+**Callers don't always call back-to-back.** Two mechanisms create realistic intermittent calling:
+
+1. **Retry Delay**: After each CQ, callers wait a random delay (200-1200ms) before they're ready to call again. If you send your next CQ quickly, some callers won't be ready yet.
+
+2. **Call Probability**: Even when ready, callers may "sit out" a round:
+   - Patience 2: 60% chance to call each round
+   - Patience 3: 70% chance to call each round
+   - Patience 5: 90% chance to call each round
+
+This models real operator behavior—pausing to tune around, waiting for the pileup to thin, or timing their call strategically.
+
+More patient callers are more persistent, but even they exhibit natural variation. A caller with patience 3 might call on rounds 1 and 3, skipping round 2 entirely.
+
+These behaviors are controlled by the `[simulation.pileup]` settings.
+
+---
+
 ## Configuration File
 
 Settings are stored in TOML format at:

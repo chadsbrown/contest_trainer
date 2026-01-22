@@ -267,6 +267,34 @@ The `CallerManager` maintains a persistent queue of callers:
 - `on_qso_complete(id)` - Mark caller as worked
 - `try_spawn_tail_ender()` - Attempt to spawn a tail-ender after QSO
 
+### Caller Selection and Retry Probability
+
+When `on_cq_complete()` selects which callers respond, two factors determine if a caller participates:
+
+1. **Retry Delay**: After `on_cq_restart()`, each caller gets a random delay (200-1200ms) before they're ready again. Callers check `ready_at` to see if they can call.
+
+2. **Call Probability**: Even when ready, callers have a probability-based chance to "sit out":
+   ```
+   call_probability = 0.5 + (patience - 1) * 0.1
+   ```
+   - Patience 2: 60% chance to call
+   - Patience 3: 70% chance to call
+   - Patience 5: 90% chance to call
+
+This means callers don't always call back-to-back. A caller with patience 3 might call on rounds 1 and 3, skipping round 2.
+
+### Call Correction Probability
+
+When a user submits an incorrect callsign, correction behavior is probabilistic:
+
+1. **Correction Decision**: 80% chance the station corrects, 20% just proceeds (busted call)
+
+2. **Correction Format** (when correcting):
+   - 85%: `CallOnly` - sends callsign twice ("W1ABC W1ABC")
+   - 15%: `CallAndExchange` - sends callsign + exchange ("W1ABC 5NN 123")
+
+3. **Max Attempts**: Station will try to correct up to 2 times before giving up
+
 ## Configuration
 
 ### SimulationSettings
