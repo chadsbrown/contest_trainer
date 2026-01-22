@@ -96,6 +96,34 @@ pub struct SimulationSettings {
     /// Probability of a caller being from the same country as the user (0.0 - 1.0)
     #[serde(default)]
     pub same_country_probability: f32,
+    /// Pileup persistence settings
+    #[serde(default)]
+    pub pileup: PileupSettings,
+    /// Call correction settings
+    #[serde(default)]
+    pub call_correction: CallCorrectionSettings,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CallCorrectionSettings {
+    /// Probability caller will correct a busted callsign (vs just proceeding)
+    pub correction_probability: f32,
+    /// When correcting, probability of sending call only (vs call+exchange)
+    pub call_only_probability: f32,
+    /// Max times caller will try to correct before giving up
+    pub max_correction_attempts: u8,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PileupSettings {
+    /// Minimum patience (call attempts) for new callers
+    pub min_patience: u8,
+    /// Maximum patience (call attempts) for new callers
+    pub max_patience: u8,
+    /// Minimum delay before retry (ms)
+    pub retry_delay_min_ms: u32,
+    /// Maximum delay before retry (ms)
+    pub retry_delay_max_ms: u32,
 }
 
 impl Default for AppSettings {
@@ -185,6 +213,29 @@ impl Default for SimulationSettings {
             agn_request_probability: 0.1,
             same_country_filter_enabled: false,
             same_country_probability: 0.1,
+            pileup: PileupSettings::default(),
+            call_correction: CallCorrectionSettings::default(),
+        }
+    }
+}
+
+impl Default for CallCorrectionSettings {
+    fn default() -> Self {
+        Self {
+            correction_probability: 0.8,
+            call_only_probability: 0.85,
+            max_correction_attempts: 2,
+        }
+    }
+}
+
+impl Default for PileupSettings {
+    fn default() -> Self {
+        Self {
+            min_patience: 2,
+            max_patience: 5,
+            retry_delay_min_ms: 200,
+            retry_delay_max_ms: 1200,
         }
     }
 }
