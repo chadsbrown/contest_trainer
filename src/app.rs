@@ -481,7 +481,7 @@ impl ContestApp {
                             correction_type,
                             correction_attempts: correction_attempts + 1,
                         };
-                        self.current_field = InputField::Callsign;
+                        self.current_field = InputField::Exchange;
                     } else {
                         // Caller won't correct - proceed normally (user will get penalty)
                         self.send_exchange(&entered_call);
@@ -527,7 +527,7 @@ impl ContestApp {
                         correction_type,
                         correction_attempts: attempts + 1,
                     };
-                    self.current_field = InputField::Callsign;
+                    self.current_field = InputField::Exchange;
                 } else {
                     // Caller gives up correcting - proceed with wrong call
                     self.send_exchange(&entered_call);
