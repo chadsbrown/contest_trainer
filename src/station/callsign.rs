@@ -95,11 +95,6 @@ impl CallsignPool {
         Some(call)
     }
 
-    /// Reset used callsigns
-    pub fn reset(&mut self) {
-        self.used.clear();
-    }
-
     /// Basic callsign validation
     fn is_valid_callsign(call: &str) -> bool {
         if call.len() < 3 || call.len() > 10 {
@@ -109,14 +104,6 @@ impl CallsignPool {
         call.chars().any(|c| c.is_ascii_alphabetic())
             && call.chars().any(|c| c.is_ascii_digit())
             && call.chars().all(|c| c.is_ascii_alphanumeric() || c == '/')
-    }
-
-    pub fn len(&self) -> usize {
-        self.callsigns.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.callsigns.is_empty()
     }
 }
 
@@ -230,10 +217,5 @@ impl CwtCallsignPool {
                 number: station.number.clone(),
             },
         ))
-    }
-
-    /// Reset used stations
-    pub fn reset(&mut self) {
-        self.used.clear();
     }
 }

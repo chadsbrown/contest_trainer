@@ -9,7 +9,6 @@ use crate::messages::{AudioCommand, AudioEvent};
 pub struct AudioEngine {
     mixer: Arc<Mutex<Mixer>>,
     cmd_rx: Receiver<AudioCommand>,
-    event_tx: Sender<AudioEvent>,
     _stream: cpal::Stream,
 }
 
@@ -62,7 +61,6 @@ impl AudioEngine {
         Ok(Self {
             mixer,
             cmd_rx,
-            event_tx,
             _stream: stream,
         })
     }
@@ -129,9 +127,6 @@ impl AudioEngine {
                             let message = params.callsign.clone();
                             mixer.add_station(&params, &message);
                         }
-                        AudioCommand::StopStation(id) => {
-                            mixer.remove_station(id);
-                        }
                         AudioCommand::PlayUserMessage { message, wpm } => {
                             mixer.play_user_message(&message, wpm);
                         }
@@ -147,15 +142,5 @@ impl AudioEngine {
                 Err(TryRecvError::Disconnected) => break,
             }
         }
-    }
-
-    /// Check if user is currently transmitting
-    pub fn is_user_playing(&self) -> bool {
-        self.mixer.lock().unwrap().is_user_playing()
-    }
-
-    /// Get active station count
-    pub fn active_station_count(&self) -> usize {
-        self.mixer.lock().unwrap().active_station_count()
     }
 }

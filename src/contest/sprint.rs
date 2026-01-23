@@ -1,18 +1,10 @@
-use super::types::{Contest, ContestType, Exchange, ValidationResult};
+use super::types::{Contest, Exchange, ValidationResult};
 use rand::seq::SliceRandom;
 
 const NAMES: &[&str] = &[
-    "BOB", "JIM", "TOM", "JOHN", "MIKE", "DAVE", "BILL", "JOE", "DAN", "RICK",
-    "PAUL", "MARK", "GARY", "KEN", "RON", "DON", "JACK", "PETE", "AL", "ED",
-    "STEVE", "FRED", "GEORGE", "FRANK", "LARRY", "JERRY", "RAY", "CARL", "RALPH", "BRUCE",
-];
-
-const STATES: &[&str] = &[
-    "CT", "MA", "ME", "NH", "RI", "VT", "NJ", "NY", "DE", "MD", "PA",
-    "AL", "FL", "GA", "KY", "NC", "SC", "TN", "VA", "AR", "LA", "MS", "NM", "OK", "TX",
-    "CA", "AZ", "ID", "MT", "NV", "OR", "UT", "WA", "WY", "CO",
-    "IA", "KS", "MN", "MO", "NE", "ND", "SD", "IL", "IN", "WI",
-    "MI", "OH", "WV",
+    "BOB", "JIM", "TOM", "JOHN", "MIKE", "DAVE", "BILL", "JOE", "DAN", "RICK", "PAUL", "MARK",
+    "GARY", "KEN", "RON", "DON", "JACK", "PETE", "AL", "ED", "STEVE", "FRED", "GEORGE", "FRANK",
+    "LARRY", "JERRY", "RAY", "CARL", "RALPH", "BRUCE",
 ];
 
 pub struct NaSprintContest;
@@ -38,29 +30,18 @@ impl NaSprintContest {
             Some('9') => "IL",
             Some('0') => "CO",
             _ => "CA",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
 impl Contest for NaSprintContest {
-    fn contest_type(&self) -> ContestType {
-        ContestType::NaSprint
-    }
-
-    fn name(&self) -> &'static str {
-        "North American Sprint"
-    }
-
     fn generate_exchange(&self, callsign: &str, serial: u32) -> Exchange {
         let mut rng = rand::thread_rng();
         let name = NAMES.choose(&mut rng).unwrap_or(&"BOB").to_string();
         let qth = Self::qth_for_callsign(callsign);
 
-        Exchange::Sprint {
-            serial,
-            name,
-            qth,
-        }
+        Exchange::Sprint { serial, name, qth }
     }
 
     fn format_sent_exchange(&self, exchange: &Exchange) -> String {
@@ -72,19 +53,34 @@ impl Contest for NaSprintContest {
         }
     }
 
-    fn user_exchange(&self, _callsign: &str, serial: u32, _zone: u8, section: &str, name: &str) -> String {
+    fn user_exchange(
+        &self,
+        _callsign: &str,
+        serial: u32,
+        _zone: u8,
+        section: &str,
+        name: &str,
+    ) -> String {
         format!("{} {} {}", serial, name, section)
     }
 
-    fn validate(&self, expected_call: &str, expected_exchange: &Exchange,
-                received_call: &str, received_exchange: &str) -> ValidationResult {
+    fn validate(
+        &self,
+        expected_call: &str,
+        expected_exchange: &Exchange,
+        received_call: &str,
+        received_exchange: &str,
+    ) -> ValidationResult {
         let callsign_correct = expected_call.eq_ignore_ascii_case(received_call);
 
         let exchange_correct = match expected_exchange {
             Exchange::Sprint { serial, name, qth } => {
                 let parts: Vec<&str> = received_exchange.split_whitespace().collect();
                 if parts.len() >= 3 {
-                    let serial_ok = parts[0].parse::<u32>().map(|s| s == *serial).unwrap_or(false);
+                    let serial_ok = parts[0]
+                        .parse::<u32>()
+                        .map(|s| s == *serial)
+                        .unwrap_or(false);
                     let name_ok = parts[1].eq_ignore_ascii_case(name);
                     let qth_ok = parts[2].eq_ignore_ascii_case(qth);
                     serial_ok && name_ok && qth_ok
@@ -98,7 +94,11 @@ impl Contest for NaSprintContest {
         ValidationResult {
             callsign_correct,
             exchange_correct,
-            points: if callsign_correct && exchange_correct { 1 } else { 0 },
+            points: if callsign_correct && exchange_correct {
+                1
+            } else {
+                0
+            },
         }
     }
 }

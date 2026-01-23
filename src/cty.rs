@@ -1,13 +1,9 @@
 use std::collections::HashMap;
-use std::path::Path;
 
 /// Parsed entry from cty.dat representing a DXCC entity
 #[derive(Debug, Clone)]
 pub struct DxccEntity {
-    pub name: String,
     pub cq_zone: u8,
-    pub itu_zone: u8,
-    pub continent: String,
     pub primary_prefix: String,
 }
 
@@ -15,8 +11,6 @@ pub struct DxccEntity {
 #[derive(Debug, Clone)]
 struct PrefixEntry {
     cq_zone: u8,
-    itu_zone: u8,
-    is_exact: bool, // true if this is an exact callsign match (prefixed with =)
     country_prefix: String, // the primary prefix for the country this entry belongs to
 }
 
@@ -29,12 +23,6 @@ pub struct CtyDat {
 }
 
 impl CtyDat {
-    /// Load and parse a cty.dat file
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
-        let content = std::fs::read_to_string(path)?;
-        Ok(Self::parse(&content))
-    }
-
     /// Parse cty.dat content from a string
     pub fn parse(content: &str) -> Self {
         let mut exact_calls: HashMap<String, PrefixEntry> = HashMap::new();
@@ -97,18 +85,12 @@ impl CtyDat {
             return None;
         }
 
-        let name = parts[0].trim().to_string();
         let cq_zone = parts[1].trim().parse().unwrap_or(0);
-        let itu_zone = parts[2].trim().parse().unwrap_or(0);
-        let continent = parts[3].trim().to_string();
         // parts[4] = lat, parts[5] = lon, parts[6] = tz offset
         let primary_prefix = parts[7].trim().trim_start_matches('*').to_string();
 
         Some(DxccEntity {
-            name,
             cq_zone,
-            itu_zone,
-            continent,
             primary_prefix,
         })
     }
@@ -129,12 +111,10 @@ impl CtyDat {
                 continue;
             }
 
-            let (call_or_prefix, cq_override, itu_override, is_exact) = Self::parse_alias(alias);
+            let (call_or_prefix, cq_override, _itu_override, is_exact) = Self::parse_alias(alias);
 
             let entry = PrefixEntry {
                 cq_zone: cq_override.unwrap_or(entity.cq_zone),
-                itu_zone: itu_override.unwrap_or(entity.itu_zone),
-                is_exact,
                 country_prefix: entity.primary_prefix.to_uppercase(),
             };
 
@@ -250,25 +230,6 @@ impl CtyDat {
         None
     }
 
-    /// Look up both CQ and ITU zones for a callsign
-    pub fn lookup_zones(&self, callsign: &str) -> Option<(u8, u8)> {
-        let call = callsign.to_uppercase();
-
-        // First try exact match
-        if let Some(entry) = self.exact_calls.get(&call) {
-            return Some((entry.cq_zone, entry.itu_zone));
-        }
-
-        // Then try longest prefix match
-        for (prefix, entry) in &self.prefixes {
-            if call.starts_with(prefix) {
-                return Some((entry.cq_zone, entry.itu_zone));
-            }
-        }
-
-        None
-    }
-
     /// Look up the matching prefix for a callsign (represents the DXCC entity/country)
     pub fn lookup_prefix(&self, callsign: &str) -> Option<String> {
         let call = callsign.to_uppercase();
@@ -305,10 +266,7 @@ mod tests {
     fn test_parse_header() {
         let line = "United States:            05:  08:  NA:   37.60:    91.87:     5.0:  K:";
         let entity = CtyDat::parse_header(line).unwrap();
-        assert_eq!(entity.name, "United States");
         assert_eq!(entity.cq_zone, 5);
-        assert_eq!(entity.itu_zone, 8);
-        assert_eq!(entity.continent, "NA");
         assert_eq!(entity.primary_prefix, "K");
     }
 

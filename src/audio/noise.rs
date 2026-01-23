@@ -236,17 +236,6 @@ impl NoiseGenerator {
         base_noise + crash + pop + qrn
     }
 
-    /// Generate a single noise sample (legacy interface without settings)
-    pub fn next_sample_simple(&mut self, level: f32) -> f32 {
-        // Generate white noise
-        let white: f32 = self.rng.gen_range(-1.0..1.0);
-
-        // Apply bandpass filter for realistic receiver noise
-        let filtered = self.filter.process(white);
-
-        filtered * level
-    }
-
     /// Fill a buffer with noise samples (additive)
     pub fn fill_buffer(&mut self, buffer: &mut [f32], level: f32, settings: &NoiseSettings) {
         for sample in buffer.iter_mut() {

@@ -25,13 +25,6 @@ impl CallsignSource {
             CallsignSource::Cwt(pool) => pool.random(),
         }
     }
-
-    pub fn reset(&mut self) {
-        match self {
-            CallsignSource::Regular(pool) => pool.reset(),
-            CallsignSource::Cwt(pool) => pool.reset(),
-        }
-    }
 }
 
 /// State of a caller in the persistent queue
@@ -365,24 +358,6 @@ impl CallerManager {
         self.active_ids.retain(|id| *id != station_id);
     }
 
-    /// Get the current active callers (for state tracking)
-    pub fn get_active_callers(&self) -> Vec<&PersistentCaller> {
-        self.queue
-            .iter()
-            .filter(|c| self.active_ids.contains(&c.params.id))
-            .collect()
-    }
-
-    /// Get a specific caller by ID
-    pub fn get_caller(&self, id: StationId) -> Option<&PersistentCaller> {
-        self.queue.iter().find(|c| c.params.id == id)
-    }
-
-    /// Get a mutable reference to a specific caller
-    pub fn get_caller_mut(&mut self, id: StationId) -> Option<&mut PersistentCaller> {
-        self.queue.iter_mut().find(|c| c.params.id == id)
-    }
-
     /// Called when audio for a station completes
     pub fn station_audio_complete(&mut self, _id: StationId) {
         // Currently just for tracking - caller remains in active state
@@ -425,24 +400,5 @@ impl CallerManager {
         }
 
         None
-    }
-
-    /// Get active caller count
-    pub fn active_count(&self) -> usize {
-        self.active_ids.len()
-    }
-
-    /// Get queue size (callers still interested)
-    pub fn queue_size(&self) -> usize {
-        self.queue
-            .iter()
-            .filter(|c| c.state != CallerState::GaveUp && c.state != CallerState::Worked)
-            .count()
-    }
-
-    /// Full reset - clear everything (used when changing contest type, etc.)
-    pub fn reset(&mut self) {
-        self.queue.clear();
-        self.active_ids.clear();
     }
 }

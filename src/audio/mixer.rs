@@ -90,7 +90,6 @@ impl QsbOscillator {
 /// State for an active station being rendered
 pub struct ActiveStation {
     pub id: StationId,
-    pub callsign: String,
     pub elements: Vec<MorseElement>,
     pub current_element_idx: usize,
     pub samples_in_element: usize,
@@ -124,7 +123,6 @@ impl ActiveStation {
 
         Self {
             id: params.id,
-            callsign: params.callsign.clone(),
             elements,
             current_element_idx: 0,
             samples_in_element,
@@ -289,11 +287,6 @@ impl Mixer {
         self.stations.push(station);
     }
 
-    /// Remove a station by ID
-    pub fn remove_station(&mut self, id: StationId) {
-        self.stations.retain(|s| s.id != id);
-    }
-
     /// Start playing a user message
     pub fn play_user_message(&mut self, message: &str, wpm: u8) {
         self.user_station = Some(UserStation::new(
@@ -385,15 +378,5 @@ impl Mixer {
         }
 
         (completed_stations, user_completed)
-    }
-
-    /// Check if user station is currently playing
-    pub fn is_user_playing(&self) -> bool {
-        self.user_station.is_some()
-    }
-
-    /// Get count of active calling stations
-    pub fn active_station_count(&self) -> usize {
-        self.stations.len()
     }
 }

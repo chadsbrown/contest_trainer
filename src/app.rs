@@ -32,10 +32,7 @@ pub enum ContestState {
     /// Station(s) are calling
     StationsCalling { callers: Vec<ActiveCaller> },
     /// User sent partial callsign query, waiting for matching station to repeat
-    QueryingPartial {
-        callers: Vec<ActiveCaller>,
-        partial: String,
-    },
+    QueryingPartial { callers: Vec<ActiveCaller> },
     /// Brief pause before station repeats callsign after partial query
     WaitingForPartialResponse {
         callers: Vec<ActiveCaller>,
@@ -69,7 +66,7 @@ pub enum ContestState {
     /// Waiting for user to resend exchange after caller requested AGN
     WaitingForUserExchangeRepeat { caller: ActiveCaller },
     /// QSO complete, showing result
-    QsoComplete { result: QsoResult },
+    QsoComplete,
     /// Brief pause before tail-ender starts calling
     WaitingForTailEnder {
         callers: Vec<ActiveCaller>,
@@ -431,10 +428,7 @@ impl ContestApp {
 
         // Transition to QueryingPartial state with matching callers (may be empty)
         let matching: Vec<ActiveCaller> = matching_caller.into_iter().cloned().collect();
-        self.state = ContestState::QueryingPartial {
-            callers: matching,
-            partial,
-        };
+        self.state = ContestState::QueryingPartial { callers: matching };
     }
 
     fn handle_callsign_submit(&mut self) {
@@ -601,8 +595,8 @@ impl ContestApp {
         // Send TU
         self.send_tu();
 
-        self.last_qso_result = Some(result.clone());
-        self.state = ContestState::QsoComplete { result };
+        self.last_qso_result = Some(result);
+        self.state = ContestState::QsoComplete;
 
         // Clear inputs
         self.callsign_input.clear();
@@ -714,14 +708,11 @@ impl ContestApp {
                             let wait_until = Instant::now() + std::time::Duration::from_millis(250);
                             self.state = ContestState::WaitingToSendExchange { caller, wait_until };
                         }
-                        ContestState::QsoComplete { .. } => {
+                        ContestState::QsoComplete => {
                             // TU finished - maybe a tail-ender jumps in
                             self.try_spawn_tail_ender();
                         }
-                        ContestState::QueryingPartial {
-                            callers,
-                            partial: _,
-                        } => {
+                        ContestState::QueryingPartial { callers } => {
                             // Partial query sent, wait briefly before station repeats
                             let callers = callers.clone();
                             let wait_until = Instant::now() + std::time::Duration::from_millis(250);
@@ -1229,7 +1220,7 @@ impl eframe::App for ContestApp {
 
         // Top menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Settings").clicked() {
                         self.show_settings = !self.show_settings;

@@ -21,8 +21,6 @@ pub struct StationParams {
 pub enum AudioCommand {
     /// Start playing morse for a station
     StartStation(StationParams),
-    /// Stop a specific station
-    StopStation(StationId),
     /// Play a message as the user's station (CQ, exchange, TU)
     PlayUserMessage { message: String, wpm: u8 },
     /// Update global audio settings

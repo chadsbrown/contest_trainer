@@ -44,19 +44,6 @@ pub enum Exchange {
     },
 }
 
-/// User's parsed exchange entry
-#[derive(Clone, Debug, Default)]
-pub struct ParsedExchange {
-    pub rst: Option<String>,
-    pub zone: Option<u8>,
-    pub serial: Option<u32>,
-    pub name: Option<String>,
-    pub qth: Option<String>,
-    pub precedence: Option<char>,
-    pub check: Option<u16>,
-    pub section: Option<String>,
-}
-
 /// Result of validating user's exchange against expected
 #[derive(Clone, Debug)]
 pub struct ValidationResult {
@@ -67,12 +54,6 @@ pub struct ValidationResult {
 
 /// Trait for contest-specific behavior
 pub trait Contest: Send + Sync {
-    /// Get the contest type
-    fn contest_type(&self) -> ContestType;
-
-    /// Get display name
-    fn name(&self) -> &'static str;
-
     /// Generate a random exchange for a calling station
     fn generate_exchange(&self, callsign: &str, serial: u32) -> Exchange;
 

@@ -1,14 +1,5 @@
-use super::types::{Contest, ContestType, Exchange, ValidationResult};
+use super::types::{Contest, Exchange, ValidationResult};
 use rand::Rng;
-
-const SECTIONS: &[&str] = &[
-    "CT", "EMA", "ME", "NH", "RI", "VT", "WMA", "ENY", "NLI", "NNJ", "NNY", "SNJ", "WNY", "DE",
-    "EPA", "MDC", "WPA", "AL", "GA", "KY", "NC", "NFL", "SC", "SFL", "WCF", "TN", "VA", "PR", "VI",
-    "AR", "LA", "MS", "NM", "NTX", "OK", "STX", "WTX", "EB", "LAX", "ORG", "SB", "SCV", "SDG",
-    "SF", "SJV", "SV", "AZ", "EWA", "ID", "MT", "NV", "OR", "UT", "WWA", "WY", "AK", "IA", "KS",
-    "MN", "MO", "NE", "ND", "SD", "IL", "IN", "WI", "MI", "OH", "WV", "CO", "HI", "PAC", "AB",
-    "BC", "GTA", "MAR", "MB", "NL", "NT", "ONE", "ONN", "ONS", "PE", "QC", "SK", "TER",
-];
 
 const PRECEDENCES: &[char] = &['A', 'B', 'M', 'Q', 'S', 'U'];
 
@@ -41,14 +32,6 @@ impl SweepstakesContest {
 }
 
 impl Contest for SweepstakesContest {
-    fn contest_type(&self) -> ContestType {
-        ContestType::Sweepstakes
-    }
-
-    fn name(&self) -> &'static str {
-        "ARRL Sweepstakes"
-    }
-
     fn generate_exchange(&self, callsign: &str, serial: u32) -> Exchange {
         let mut rng = rand::thread_rng();
         let precedence = *PRECEDENCES

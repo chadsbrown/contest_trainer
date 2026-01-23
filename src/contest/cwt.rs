@@ -1,4 +1,4 @@
-use super::types::{Contest, ContestType, Exchange, ValidationResult};
+use super::types::{Contest, Exchange, ValidationResult};
 
 /// CWT (CW Ops CW Test) contest
 /// Exchange: Name + Member Number (or state/country if not a member)
@@ -11,14 +11,6 @@ impl CwtContest {
 }
 
 impl Contest for CwtContest {
-    fn contest_type(&self) -> ContestType {
-        ContestType::Cwt
-    }
-
-    fn name(&self) -> &'static str {
-        "CWT"
-    }
-
     fn generate_exchange(&self, _callsign: &str, _serial: u32) -> Exchange {
         // This will be overridden by the CWT callsign pool which provides name/number
         Exchange::Cwt {

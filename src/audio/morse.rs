@@ -28,7 +28,6 @@ impl MorseElement {
 
 /// Calculates Morse timing based on WPM
 pub struct MorseTimer {
-    sample_rate: u32,
     samples_per_unit: usize,
 }
 
@@ -40,24 +39,12 @@ impl MorseTimer {
         let units_per_second = (wpm as f64 * 50.0) / 60.0;
         let samples_per_unit = (sample_rate as f64 / units_per_second) as usize;
 
-        Self {
-            sample_rate,
-            samples_per_unit,
-        }
+        Self { samples_per_unit }
     }
 
     /// Get samples for a given element
     pub fn element_samples(&self, element: MorseElement) -> usize {
         self.samples_per_unit * element.units() as usize
-    }
-
-    /// Get samples per unit (dit length)
-    pub fn samples_per_unit(&self) -> usize {
-        self.samples_per_unit
-    }
-
-    pub fn sample_rate(&self) -> u32 {
-        self.sample_rate
     }
 }
 
@@ -81,11 +68,6 @@ impl ToneGenerator {
             phase: 0.0,
             ramp_samples,
         }
-    }
-
-    /// Set the frequency (for frequency offset support)
-    pub fn set_frequency(&mut self, frequency_hz: f32) {
-        self.frequency_hz = frequency_hz;
     }
 
     /// Generate a sample at the current phase
@@ -225,7 +207,9 @@ mod tests {
     fn test_morse_timer() {
         let timer = MorseTimer::new(44100, 20);
         // At 20 WPM, 1 unit = 60ms = 2646 samples at 44100Hz
-        assert!(timer.samples_per_unit() > 2000);
-        assert!(timer.samples_per_unit() < 3000);
+        // element_samples for Dit (1 unit) should be close to 2646
+        let dit_samples = timer.element_samples(MorseElement::Dit);
+        assert!(dit_samples > 2000);
+        assert!(dit_samples < 3000);
     }
 }

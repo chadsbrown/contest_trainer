@@ -1,4 +1,4 @@
-use super::types::{Contest, ContestType, Exchange, ValidationResult};
+use super::types::{Contest, Exchange, ValidationResult};
 use crate::cty::CtyDat;
 
 pub struct CqWwContest {
@@ -20,14 +20,6 @@ impl CqWwContest {
 }
 
 impl Contest for CqWwContest {
-    fn contest_type(&self) -> ContestType {
-        ContestType::CqWw
-    }
-
-    fn name(&self) -> &'static str {
-        "CQ World Wide DX"
-    }
-
     fn generate_exchange(&self, callsign: &str, _serial: u32) -> Exchange {
         Exchange::CqWw {
             rst: "5NN".to_string(), // Contest shorthand for 599
