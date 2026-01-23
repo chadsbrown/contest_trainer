@@ -937,6 +937,8 @@ impl ContestApp {
     }
 
     fn check_waiting_to_send_call_correction(&mut self) {
+        use rand::Rng;
+
         if let ContestState::WaitingToSendCallCorrection {
             caller,
             correction_type,
@@ -948,12 +950,17 @@ impl ContestApp {
                 let caller = caller.clone();
                 let correction_type = *correction_type;
                 let correction_attempts = *correction_attempts;
+                let mut rng = rand::thread_rng();
 
                 // Station sends correction based on type
                 let message = match correction_type {
                     CallCorrectionType::CallOnly => {
-                        // Send callsign twice for emphasis
-                        format!("{} {}", caller.params.callsign, caller.params.callsign)
+                        // Send callsign once (75%) or twice (25%) for emphasis
+                        if rng.gen::<f32>() < 0.75 {
+                            caller.params.callsign.clone()
+                        } else {
+                            format!("{} {}", caller.params.callsign, caller.params.callsign)
+                        }
                     }
                     CallCorrectionType::CallAndExchange => {
                         // Send callsign + exchange
