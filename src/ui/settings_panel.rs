@@ -127,16 +127,6 @@ pub fn render_settings_panel(
                             if ui
                                 .selectable_value(
                                     &mut settings.contest.contest_type,
-                                    ContestType::NaSprint,
-                                    "NA Sprint",
-                                )
-                                .changed()
-                            {
-                                *settings_changed = true;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut settings.contest.contest_type,
                                     ContestType::Sweepstakes,
                                     "ARRL Sweepstakes",
                                 )

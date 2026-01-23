@@ -189,7 +189,6 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
         ui.add_space(50.0);
         let hint = match app.settings.contest.contest_type {
             crate::contest::ContestType::CqWw => "Format: RST ZONE (e.g., 599 05)",
-            crate::contest::ContestType::NaSprint => "Format: NR NAME QTH (e.g., 123 BOB TX)",
             crate::contest::ContestType::Sweepstakes => "Format: NR PREC CK SEC (e.g., 42 A 99 CT)",
             crate::contest::ContestType::Cwt => "Format: NAME NUMBER (e.g., BOB 123 or JOE TX)",
         };

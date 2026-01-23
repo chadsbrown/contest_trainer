@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ContestType {
     CqWw,
-    NaSprint,
     Sweepstakes,
     Cwt,
 }
@@ -13,7 +12,6 @@ impl ContestType {
     pub fn display_name(&self) -> &'static str {
         match self {
             ContestType::CqWw => "CQ World Wide",
-            ContestType::NaSprint => "NA Sprint",
             ContestType::Sweepstakes => "ARRL Sweepstakes",
             ContestType::Cwt => "CWT",
         }
@@ -26,11 +24,6 @@ pub enum Exchange {
     CqWw {
         rst: String,
         zone: u8,
-    },
-    Sprint {
-        serial: u32,
-        name: String,
-        qth: String,
     },
     Sweepstakes {
         serial: u32,

@@ -39,7 +39,7 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Values**: Any valid callsign string
 
 ### Your Name
-- **Purpose**: Your operator name, sent as part of exchange in contests that require it (e.g., NA Sprint, CWT)
+- **Purpose**: Your operator name, sent as part of exchange in contests that require it (e.g., CWT)
 - **Default**: `OP`
 - **Values**: Any name string (automatically uppercased)
 
@@ -82,7 +82,6 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Default**: `CWT`
 - **Values**:
   - **CQ World Wide (CqWw)**: Exchange is RST + CQ Zone (e.g., `599 05`)
-  - **NA Sprint (NaSprint)**: Exchange is serial number + name + state (e.g., `123 BOB TX`)
   - **ARRL Sweepstakes**: Exchange is serial + precedence + check + section (e.g., `42 A 99 CT`)
   - **CWT**: Exchange is name + number or name + state (e.g., `BOB 123` or `JOE TX`)
 
@@ -221,7 +220,6 @@ Opens a detailed statistics window showing:
 | Contest | Exchange Format | Example |
 |---------|----------------|---------|
 | CQ WW | RST + Zone | `599 05` |
-| NA Sprint | Serial + Name + State | `123 BOB TX` |
 | Sweepstakes | Serial + Prec + Check + Section | `42 A 99 CT` |
 | CWT | Name + Number (or Name + State) | `BOB 123` or `JOE TX` |
 
