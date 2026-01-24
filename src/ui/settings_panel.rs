@@ -129,7 +129,7 @@ pub fn render_settings_panel(
 
                     ui.add_space(8.0);
                     ui.label(RichText::new("Keyboard Controls:").italics());
-                    ui.label("  Pause - Swap radios");
+                    ui.label("  Insert - Swap radios");
                     ui.label("  ` (backtick) - Toggle stereo");
                     ui.label("  Ctrl+Left/Right - Select radio");
                     ui.label("  Ctrl+Fn - Send on other radio");

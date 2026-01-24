@@ -1242,6 +1242,31 @@ impl ContestApp {
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
+            // 2BSIQ mode keyboard controls
+            if self.settings.user.two_bsiq_enabled {
+                // Insert key - Swap radios (Pause key not available in egui)
+                if i.key_pressed(Key::Insert) {
+                    self.focused_radio = self.focused_radio.other();
+                }
+
+                // Backtick (`) - Toggle stereo mode
+                if i.key_pressed(Key::Backtick) {
+                    self.stereo_enabled = !self.stereo_enabled;
+                }
+
+                // Ctrl+Left Arrow - Focus Radio 1 (left)
+                if i.modifiers.ctrl && i.key_pressed(Key::ArrowLeft) {
+                    self.focused_radio = RadioId::Radio1;
+                    return; // Don't process as WPM change
+                }
+
+                // Ctrl+Right Arrow - Focus Radio 2 (right)
+                if i.modifiers.ctrl && i.key_pressed(Key::ArrowRight) {
+                    self.focused_radio = RadioId::Radio2;
+                    return; // Don't process as anything else
+                }
+            }
+
             // F1 - Send CQ (always available - persistent callers may retry)
             if i.key_pressed(Key::F1) {
                 // Stop any playing audio

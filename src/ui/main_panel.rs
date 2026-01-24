@@ -242,7 +242,7 @@ fn render_radio_input_fields(
 /// Render 2BSIQ-specific key hints
 fn render_2bsiq_key_hints(ui: &mut egui::Ui, stereo_enabled: bool, focused_radio: RadioId) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Pause").strong().monospace());
+        ui.label(RichText::new("Ins").strong().monospace());
         ui.label("Swap");
         ui.add_space(8.0);
 

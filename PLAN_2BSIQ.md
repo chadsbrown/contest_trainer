@@ -267,7 +267,7 @@ Each phase is self-contained with a clear verification step. Can be completed ac
 
 ---
 
-### Phase 7: Radio Focus Keyboard Controls
+[x] Phase 7: Radio Focus Keyboard Controls (completed)
 **Goal**: Implement radio switching keys
 
 **Changes**:
