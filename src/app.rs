@@ -93,6 +93,33 @@ pub enum ContestState {
         caller: ActiveCaller,
         correction_attempts: u8,
     },
+    /// User requested callsign repeat (F8) while in call correction flow
+    SendingCallsignAgnFromCorrection {
+        caller: ActiveCaller,
+        correction_attempts: u8,
+    },
+    /// Waiting for station to repeat callsign during call correction flow
+    WaitingForCallsignAgnFromCorrection {
+        caller: ActiveCaller,
+        correction_attempts: u8,
+        wait_until: Instant,
+    },
+    /// Station is repeating callsign after user requested repeat during correction
+    SendingCorrectionRepeat {
+        caller: ActiveCaller,
+        correction_attempts: u8,
+    },
+    /// User sent partial query (F5) while in call correction flow
+    QueryingPartialFromCorrection {
+        caller: ActiveCaller,
+        correction_attempts: u8,
+    },
+    /// Waiting for station to respond to partial query during call correction flow
+    WaitingForPartialResponseFromCorrection {
+        caller: ActiveCaller,
+        correction_attempts: u8,
+        wait_until: Instant,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -402,21 +429,33 @@ impl ContestApp {
             return;
         }
 
-        // Only works when stations are calling
-        let callers = match &self.state {
-            ContestState::StationsCalling { callers } => callers.clone(),
+        // Works when stations are calling OR when waiting for call correction
+        let (callers, correction_context) = match &self.state {
+            ContestState::StationsCalling { callers } => (callers.clone(), None),
+            ContestState::WaitingForCallCorrection {
+                caller,
+                correction_attempts,
+            } => (vec![caller.clone()], Some(*correction_attempts)),
             _ => return,
         };
 
         // Send the partial query
         self.send_partial_query(&partial);
 
-        // Find the most similar caller
-        let matching_caller = Self::find_similar_caller(&partial, &callers);
-
-        // Transition to QueryingPartial state with matching callers (may be empty)
-        let matching: Vec<ActiveCaller> = matching_caller.into_iter().cloned().collect();
-        self.state = ContestState::QueryingPartial { callers: matching };
+        // Transition to appropriate state based on context
+        if let Some(correction_attempts) = correction_context {
+            // In correction context, always use the single caller (no matching needed)
+            let caller = callers.into_iter().next().unwrap();
+            self.state = ContestState::QueryingPartialFromCorrection {
+                caller,
+                correction_attempts,
+            };
+        } else {
+            // Normal flow - find the most similar caller
+            let matching_caller = Self::find_similar_caller(&partial, &callers);
+            let matching: Vec<ActiveCaller> = matching_caller.into_iter().cloned().collect();
+            self.state = ContestState::QueryingPartial { callers: matching };
+        }
     }
 
     fn handle_callsign_submit(&mut self) {
@@ -598,9 +637,13 @@ impl ContestApp {
     }
 
     fn handle_callsign_agn_request(&mut self) {
-        // Only works when stations are calling
-        let callers = match &self.state {
-            ContestState::StationsCalling { callers } => callers.clone(),
+        // Works when stations are calling OR when waiting for call correction
+        let (callers, correction_context) = match &self.state {
+            ContestState::StationsCalling { callers } => (callers.clone(), None),
+            ContestState::WaitingForCallCorrection {
+                caller,
+                correction_attempts,
+            } => (vec![caller.clone()], Some(*correction_attempts)),
             _ => return,
         };
 
@@ -614,7 +657,16 @@ impl ContestApp {
             wpm: self.settings.user.wpm,
         });
 
-        self.state = ContestState::SendingCallsignAgn { callers };
+        // Transition to appropriate state based on context
+        if let Some(correction_attempts) = correction_context {
+            let caller = callers.into_iter().next().unwrap();
+            self.state = ContestState::SendingCallsignAgnFromCorrection {
+                caller,
+                correction_attempts,
+            };
+        } else {
+            self.state = ContestState::SendingCallsignAgn { callers };
+        }
         self.used_agn_callsign = true;
     }
 
@@ -648,6 +700,22 @@ impl ContestApp {
                         if caller.params.id == id {
                             let caller = caller.clone();
                             // Wait for user to correct callsign and resend
+                            self.state = ContestState::WaitingForCallCorrection {
+                                caller,
+                                correction_attempts,
+                            };
+                        }
+                    }
+
+                    // If station finished repeating callsign (after F8/F5 during correction flow)
+                    if let ContestState::SendingCorrectionRepeat {
+                        ref caller,
+                        correction_attempts,
+                    } = self.state
+                    {
+                        if caller.params.id == id {
+                            let caller = caller.clone();
+                            // Return to waiting for user to correct callsign
                             self.state = ContestState::WaitingForCallCorrection {
                                 caller,
                                 correction_attempts,
@@ -705,6 +773,34 @@ impl ContestApp {
                             let correction_attempts = *correction_attempts;
                             let wait_until = Instant::now() + std::time::Duration::from_millis(250);
                             self.state = ContestState::WaitingToSendCallCorrection {
+                                caller,
+                                correction_attempts,
+                                wait_until,
+                            };
+                        }
+                        ContestState::SendingCallsignAgnFromCorrection {
+                            caller,
+                            correction_attempts,
+                        } => {
+                            // AGN request sent during correction flow, wait briefly before station repeats
+                            let caller = caller.clone();
+                            let correction_attempts = *correction_attempts;
+                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                            self.state = ContestState::WaitingForCallsignAgnFromCorrection {
+                                caller,
+                                correction_attempts,
+                                wait_until,
+                            };
+                        }
+                        ContestState::QueryingPartialFromCorrection {
+                            caller,
+                            correction_attempts,
+                        } => {
+                            // Partial query sent during correction flow, wait briefly before station responds
+                            let caller = caller.clone();
+                            let correction_attempts = *correction_attempts;
+                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                            self.state = ContestState::WaitingForPartialResponseFromCorrection {
                                 caller,
                                 correction_attempts,
                                 wait_until,
@@ -924,6 +1020,66 @@ impl ContestApp {
                 }));
 
                 self.state = ContestState::SendingCallCorrection {
+                    caller,
+                    correction_attempts,
+                };
+            }
+        }
+    }
+
+    fn check_waiting_for_callsign_agn_from_correction(&mut self) {
+        if let ContestState::WaitingForCallsignAgnFromCorrection {
+            caller,
+            correction_attempts,
+            wait_until,
+        } = &self.state
+        {
+            if Instant::now() >= *wait_until {
+                let caller = caller.clone();
+                let correction_attempts = *correction_attempts;
+
+                // Have station resend their callsign
+                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                    id: caller.params.id,
+                    callsign: caller.params.callsign.clone(),
+                    exchange: caller.params.exchange.clone(),
+                    frequency_offset_hz: caller.params.frequency_offset_hz,
+                    wpm: caller.params.wpm,
+                    amplitude: caller.params.amplitude,
+                }));
+
+                // Track that station is sending callsign repeat, will return to WaitingForCallCorrection when done
+                self.state = ContestState::SendingCorrectionRepeat {
+                    caller,
+                    correction_attempts,
+                };
+            }
+        }
+    }
+
+    fn check_waiting_for_partial_response_from_correction(&mut self) {
+        if let ContestState::WaitingForPartialResponseFromCorrection {
+            caller,
+            correction_attempts,
+            wait_until,
+        } = &self.state
+        {
+            if Instant::now() >= *wait_until {
+                let caller = caller.clone();
+                let correction_attempts = *correction_attempts;
+
+                // Have station send their callsign
+                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                    id: caller.params.id,
+                    callsign: caller.params.callsign.clone(),
+                    exchange: caller.params.exchange.clone(),
+                    frequency_offset_hz: caller.params.frequency_offset_hz,
+                    wpm: caller.params.wpm,
+                    amplitude: caller.params.amplitude,
+                }));
+
+                // Track that station is sending callsign, will return to WaitingForCallCorrection when done
+                self.state = ContestState::SendingCorrectionRepeat {
                     caller,
                     correction_attempts,
                 };
@@ -1158,6 +1314,12 @@ impl eframe::App for ContestApp {
 
         // Check if waiting to send call correction
         self.check_waiting_to_send_call_correction();
+
+        // Check if waiting for callsign AGN response during correction flow
+        self.check_waiting_for_callsign_agn_from_correction();
+
+        // Check if waiting for partial response during correction flow
+        self.check_waiting_for_partial_response_from_correction();
 
         // Check if waiting for tail-ender
         self.check_waiting_for_tail_ender();

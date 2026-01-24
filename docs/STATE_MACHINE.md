@@ -64,6 +64,11 @@ Two types of audio events drive state transitions:
 | `WaitingToSendCallCorrection` | Pause before station corrects wrong callsign | `caller`, `correction_attempts`, `wait_until` |
 | `SendingCallCorrection` | Station is sending callsign correction | `caller`, `correction_attempts` |
 | `WaitingForCallCorrection` | Waiting for user to fix callsign and resend | `caller`, `correction_attempts` |
+| `SendingCallsignAgnFromCorrection` | User requested callsign repeat (F8) during correction | `caller`, `correction_attempts` |
+| `WaitingForCallsignAgnFromCorrection` | Pause before station repeats callsign during correction | `caller`, `correction_attempts`, `wait_until` |
+| `SendingCorrectionRepeat` | Station repeating callsign after F8/F5 during correction | `caller`, `correction_attempts` |
+| `QueryingPartialFromCorrection` | User sent partial query (F5) during correction | `caller`, `correction_attempts` |
+| `WaitingForPartialResponseFromCorrection` | Pause before station responds to partial during correction | `caller`, `correction_attempts`, `wait_until` |
 
 ### Caller AGN Phase (Station Requests Repeat)
 
@@ -184,10 +189,44 @@ StationsCalling
                                │
                                ├─[Enter (still wrong, attempts < max)]─► (repeat correction)
                                │
-                               └─[Enter (still wrong, attempts >= max)]─► SendingExchange
+                               ├─[Enter (still wrong, attempts >= max)]─► SendingExchange
+                               │
+                               ├─[F8]─► SendingCallsignAgnFromCorrection ─► ... ─► WaitingForCallCorrection
+                               │
+                               └─[F5]─► QueryingPartialFromCorrection ─► ... ─► WaitingForCallCorrection
 ```
 
 Note: Call correction only triggers ~80% of the time when callsign is wrong. Otherwise proceeds directly to `SendingExchange`.
+
+### F8/F5 During Call Correction Flow
+
+When the user is in `WaitingForCallCorrection` and presses F8 or F5, they can request the station repeat their callsign:
+
+```
+WaitingForCallCorrection
+  │
+  ├─[F8]─► SendingCallsignAgnFromCorrection
+  │             │
+  │             ▼ [UserMessageComplete]
+  │        WaitingForCallsignAgnFromCorrection
+  │             │
+  │             ▼ [250ms elapsed]
+  │        SendingCorrectionRepeat (station sends callsign)
+  │             │
+  │             ▼ [StationComplete]
+  │        WaitingForCallCorrection
+  │
+  └─[F5]─► QueryingPartialFromCorrection
+                │
+                ▼ [UserMessageComplete]
+           WaitingForPartialResponseFromCorrection
+                │
+                ▼ [250ms elapsed]
+           SendingCorrectionRepeat (station sends callsign)
+                │
+                ▼ [StationComplete]
+           WaitingForCallCorrection
+```
 
 ### Caller Requests AGN Flow
 

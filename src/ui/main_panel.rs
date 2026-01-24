@@ -139,6 +139,21 @@ fn render_status(ui: &mut egui::Ui, state: &ContestState) {
             ("Correct callsign and resend", Color32::GREEN)
         }
         ContestState::SendingExchangeWillCorrect { .. } => ("Sending exchange...", Color32::YELLOW),
+        ContestState::SendingCallsignAgnFromCorrection { .. } => {
+            ("Requesting callsign repeat...", Color32::YELLOW)
+        }
+        ContestState::WaitingForCallsignAgnFromCorrection { .. } => {
+            ("Requesting callsign repeat...", Color32::YELLOW)
+        }
+        ContestState::SendingCorrectionRepeat { .. } => {
+            ("Station repeating callsign...", Color32::YELLOW)
+        }
+        ContestState::QueryingPartialFromCorrection { .. } => {
+            ("Querying partial...", Color32::YELLOW)
+        }
+        ContestState::WaitingForPartialResponseFromCorrection { .. } => {
+            ("Querying partial...", Color32::YELLOW)
+        }
     };
 
     ui.horizontal(|ui| {
