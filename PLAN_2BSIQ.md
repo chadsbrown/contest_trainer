@@ -301,7 +301,7 @@ Each phase is self-contained with a clear verification step. Can be completed ac
 
 ---
 
-### Phase 9: Parallel State Machines
+[x] Phase 9: Parallel State Machines (completed)
 **Goal**: Each radio runs independent ContestState
 
 **Changes**:

@@ -425,6 +425,241 @@ impl ContestApp {
         });
     }
 
+    /// Get the current contest state (uses focused radio state in 2BSIQ mode)
+    fn current_state(&self) -> &ContestState {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => &self.radio1.state,
+                RadioId::Radio2 => &self.radio2.state,
+            }
+        } else {
+            &self.state
+        }
+    }
+
+    /// Get mutable reference to current contest state
+    fn current_state_mut(&mut self) -> &mut ContestState {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => &mut self.radio1.state,
+                RadioId::Radio2 => &mut self.radio2.state,
+            }
+        } else {
+            &mut self.state
+        }
+    }
+
+    /// Get current callsign input (uses focused radio in 2BSIQ mode)
+    fn current_callsign_input(&self) -> &str {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => &self.radio1.callsign_input,
+                RadioId::Radio2 => &self.radio2.callsign_input,
+            }
+        } else {
+            &self.callsign_input
+        }
+    }
+
+    /// Get mutable reference to current callsign input
+    fn current_callsign_input_mut(&mut self) -> &mut String {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => &mut self.radio1.callsign_input,
+                RadioId::Radio2 => &mut self.radio2.callsign_input,
+            }
+        } else {
+            &mut self.callsign_input
+        }
+    }
+
+    /// Get current exchange input (uses focused radio in 2BSIQ mode)
+    fn current_exchange_input(&self) -> &str {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => &self.radio1.exchange_input,
+                RadioId::Radio2 => &self.radio2.exchange_input,
+            }
+        } else {
+            &self.exchange_input
+        }
+    }
+
+    /// Get mutable reference to current exchange input
+    fn current_exchange_input_mut(&mut self) -> &mut String {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => &mut self.radio1.exchange_input,
+                RadioId::Radio2 => &mut self.radio2.exchange_input,
+            }
+        } else {
+            &mut self.exchange_input
+        }
+    }
+
+    /// Get current input field (uses focused radio in 2BSIQ mode)
+    fn current_field(&self) -> InputField {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.current_field,
+                RadioId::Radio2 => self.radio2.current_field,
+            }
+        } else {
+            self.current_field
+        }
+    }
+
+    /// Set current input field
+    fn set_current_field(&mut self, field: InputField) {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.current_field = field,
+                RadioId::Radio2 => self.radio2.current_field = field,
+            }
+        } else {
+            self.current_field = field;
+        }
+    }
+
+    /// Get the CallerManager for the focused radio
+    fn current_caller_manager(&mut self) -> &mut CallerManager {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => &mut self.caller_manager,
+                RadioId::Radio2 => &mut self.caller_manager2,
+            }
+        } else {
+            &mut self.caller_manager
+        }
+    }
+
+    /// Get the radio_index for the focused radio
+    fn current_radio_index(&self) -> u8 {
+        if self.settings.user.two_bsiq_enabled {
+            self.focused_radio.audio_index()
+        } else {
+            0
+        }
+    }
+
+    /// Get last_cq_finished for the focused radio
+    fn current_last_cq_finished(&self) -> Option<Instant> {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.last_cq_finished,
+                RadioId::Radio2 => self.radio2.last_cq_finished,
+            }
+        } else {
+            self.last_cq_finished
+        }
+    }
+
+    /// Set last_cq_finished for the focused radio
+    fn set_last_cq_finished(&mut self, time: Option<Instant>) {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.last_cq_finished = time,
+                RadioId::Radio2 => self.radio2.last_cq_finished = time,
+            }
+        } else {
+            self.last_cq_finished = time;
+        }
+    }
+
+    /// Get/set AGN tracking for current radio
+    fn current_used_agn_callsign(&self) -> bool {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.used_agn_callsign,
+                RadioId::Radio2 => self.radio2.used_agn_callsign,
+            }
+        } else {
+            self.used_agn_callsign
+        }
+    }
+
+    fn set_used_agn_callsign(&mut self, value: bool) {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.used_agn_callsign = value,
+                RadioId::Radio2 => self.radio2.used_agn_callsign = value,
+            }
+        } else {
+            self.used_agn_callsign = value;
+        }
+    }
+
+    fn current_used_agn_exchange(&self) -> bool {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.used_agn_exchange,
+                RadioId::Radio2 => self.radio2.used_agn_exchange,
+            }
+        } else {
+            self.used_agn_exchange
+        }
+    }
+
+    fn set_used_agn_exchange(&mut self, value: bool) {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.used_agn_exchange = value,
+                RadioId::Radio2 => self.radio2.used_agn_exchange = value,
+            }
+        } else {
+            self.used_agn_exchange = value;
+        }
+    }
+
+    /// Set last QSO result for current radio
+    fn set_last_qso_result(&mut self, result: Option<QsoResult>) {
+        if self.settings.user.two_bsiq_enabled {
+            match self.focused_radio {
+                RadioId::Radio1 => self.radio1.last_qso_result = result,
+                RadioId::Radio2 => self.radio2.last_qso_result = result,
+            }
+        } else {
+            self.last_qso_result = result;
+        }
+    }
+
+    /// Sync main app fields to focused RadioState (for 2BSIQ mode)
+    /// Call this at the start of update to copy main fields to focused radio
+    fn sync_to_radio_state(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            let radio = match self.focused_radio {
+                RadioId::Radio1 => &mut self.radio1,
+                RadioId::Radio2 => &mut self.radio2,
+            };
+            radio.callsign_input = self.callsign_input.clone();
+            radio.exchange_input = self.exchange_input.clone();
+            radio.current_field = self.current_field;
+            radio.state = self.state.clone();
+            radio.last_qso_result = self.last_qso_result.clone();
+            radio.last_cq_finished = self.last_cq_finished;
+            radio.used_agn_callsign = self.used_agn_callsign;
+            radio.used_agn_exchange = self.used_agn_exchange;
+        }
+    }
+
+    /// Sync from RadioState to main app fields when switching radios
+    fn sync_from_radio_state(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            let radio = match self.focused_radio {
+                RadioId::Radio1 => &self.radio1,
+                RadioId::Radio2 => &self.radio2,
+            };
+            self.callsign_input = radio.callsign_input.clone();
+            self.exchange_input = radio.exchange_input.clone();
+            self.current_field = radio.current_field;
+            self.state = radio.state.clone();
+            self.last_qso_result = radio.last_qso_result.clone();
+            self.last_cq_finished = radio.last_cq_finished;
+            self.used_agn_callsign = radio.used_agn_callsign;
+            self.used_agn_exchange = radio.used_agn_exchange;
+        }
+    }
+
     fn send_cq(&mut self) {
         let cq_prefix = self.settings.contest.cq_message.trim();
         let callsign = self.settings.user.callsign.trim();
@@ -1254,7 +1489,11 @@ impl ContestApp {
             if self.settings.user.two_bsiq_enabled {
                 // Insert key - Swap radios (Pause key not available in egui)
                 if i.key_pressed(Key::Insert) {
+                    // Save current state to current radio before switching
+                    self.sync_to_radio_state();
                     self.focused_radio = self.focused_radio.other();
+                    // Load state from new focused radio
+                    self.sync_from_radio_state();
                     self.send_stereo_mode_update();
                 }
 
@@ -1266,15 +1505,23 @@ impl ContestApp {
 
                 // Ctrl+Left Arrow - Focus Radio 1 (left)
                 if i.modifiers.ctrl && i.key_pressed(Key::ArrowLeft) {
-                    self.focused_radio = RadioId::Radio1;
-                    self.send_stereo_mode_update();
+                    if self.focused_radio != RadioId::Radio1 {
+                        self.sync_to_radio_state();
+                        self.focused_radio = RadioId::Radio1;
+                        self.sync_from_radio_state();
+                        self.send_stereo_mode_update();
+                    }
                     return; // Don't process as WPM change
                 }
 
                 // Ctrl+Right Arrow - Focus Radio 2 (right)
                 if i.modifiers.ctrl && i.key_pressed(Key::ArrowRight) {
-                    self.focused_radio = RadioId::Radio2;
-                    self.send_stereo_mode_update();
+                    if self.focused_radio != RadioId::Radio2 {
+                        self.sync_to_radio_state();
+                        self.focused_radio = RadioId::Radio2;
+                        self.sync_from_radio_state();
+                        self.send_stereo_mode_update();
+                    }
                     return; // Don't process as anything else
                 }
             }
@@ -1564,6 +1811,9 @@ impl eframe::App for ContestApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             render_main_panel(ui, self);
         });
+
+        // Sync state to focused RadioState at end of frame (for 2BSIQ mode)
+        self.sync_to_radio_state();
 
         // Request continuous repaints for audio processing
         ctx.request_repaint();
