@@ -77,6 +77,32 @@ impl BiquadFilter {
     }
 }
 
+/// Simple pink noise generator (Kellet-style filtered white noise)
+struct PinkNoise {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+}
+
+impl PinkNoise {
+    fn new() -> Self {
+        Self {
+            b0: 0.0,
+            b1: 0.0,
+            b2: 0.0,
+        }
+    }
+
+    fn next(&mut self, white: f32) -> f32 {
+        // Lightweight approximation of 1/f noise.
+        self.b0 = 0.99765 * self.b0 + white * 0.0990460;
+        self.b1 = 0.96300 * self.b1 + white * 0.2965164;
+        self.b2 = 0.57000 * self.b2 + white * 1.0526913;
+        // Scale to keep level reasonable.
+        (self.b0 + self.b1 + self.b2 + white * 0.1848) * 0.05
+    }
+}
+
 /// Generates band noise with realistic static, crashes, and pops
 pub struct NoiseGenerator {
     rng: SmallRng,
@@ -84,6 +110,8 @@ pub struct NoiseGenerator {
 
     // Bandpass filter for realistic receiver noise
     filter: BiquadFilter,
+    // Pink noise state for more realistic HF noise coloration
+    pink: PinkNoise,
 
     // Static crash state
     crash_remaining_samples: u32,
@@ -98,6 +126,10 @@ pub struct NoiseGenerator {
     qrn_phase: f32,
     qrn_frequency: f32,
     qrn_mod_phase: f32,
+
+    // Slow noise-floor modulation (AGC-like "breathing")
+    noise_floor: f32,
+    noise_floor_alpha: f32,
 }
 
 impl NoiseGenerator {
@@ -105,10 +137,16 @@ impl NoiseGenerator {
         // Default bandpass filter centered at 600 Hz with 400 Hz bandwidth
         let filter = BiquadFilter::new(sample_rate, 600.0, 400.0);
 
+        // Low cutoff (~0.3 Hz) for slow noise-floor variation
+        let cutoff_hz = 0.3_f32;
+        let noise_floor_alpha =
+            1.0 - (-2.0 * std::f32::consts::PI * cutoff_hz / sample_rate as f32).exp();
+
         Self {
             rng: SmallRng::from_entropy(),
             sample_rate,
             filter,
+            pink: PinkNoise::new(),
             crash_remaining_samples: 0,
             crash_amplitude: 0.0,
             crash_decay: 0.0,
@@ -117,6 +155,8 @@ impl NoiseGenerator {
             qrn_phase: 0.0,
             qrn_frequency: 0.3, // Very slow oscillation
             qrn_mod_phase: 0.0,
+            noise_floor: 0.0,
+            noise_floor_alpha,
         }
     }
 
@@ -220,20 +260,28 @@ impl NoiseGenerator {
         self.maybe_start_crash(settings.crash_rate, settings.crash_intensity);
         self.maybe_start_pop(settings.pop_rate, settings.pop_intensity);
 
-        // Generate white noise base
+        // Generate white noise base and color it to pink (closer to HF band noise)
         let white: f32 = self.rng.gen_range(-1.0..1.0);
+        let pink = self.pink.next(white);
 
-        // Apply bandpass filter for realistic receiver noise
-        let filtered = self.filter.process(white);
+        // Generate impulsive components and run them through the same bandpass
+        let crash = self.crash_sample();
+        let pop = self.pop_sample();
 
-        let base_noise = filtered * level;
+        // Band-limit the combined noise to simulate the receiver CW filter
+        let filtered = self.filter.process(pink + crash + pop);
+
+        // Slow noise-floor modulation to mimic AGC/band fading
+        let target = self.rng.gen_range(-1.0..1.0);
+        self.noise_floor += self.noise_floor_alpha * (target - self.noise_floor);
+        let floor_mod = 1.0 + settings.qrn_intensity * 0.4 * self.noise_floor;
+
+        let base_noise = filtered * level * floor_mod;
 
         // Add effects
-        let crash = self.crash_sample() * level;
-        let pop = self.pop_sample() * level;
         let qrn = self.qrn_sample(settings.qrn_intensity) * level;
 
-        base_noise + crash + pop + qrn
+        base_noise + qrn
     }
 
     /// Fill a buffer with noise samples (additive)

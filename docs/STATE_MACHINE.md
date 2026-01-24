@@ -60,9 +60,9 @@ Two types of audio events drive state transitions:
 
 | State | Description | Data |
 |-------|-------------|------|
-| `SendingExchangeWillCorrect` | User sending exchange, but call was wrong - correction pending | `caller`, `correction_type`, `correction_attempts` |
-| `WaitingToSendCallCorrection` | Pause before station corrects wrong callsign | `caller`, `correction_type`, `correction_attempts`, `wait_until` |
-| `SendingCallCorrection` | Station is sending callsign correction | `caller`, `correction_type`, `correction_attempts` |
+| `SendingExchangeWillCorrect` | User sending exchange, but call was wrong - correction pending | `caller`, `correction_attempts` |
+| `WaitingToSendCallCorrection` | Pause before station corrects wrong callsign | `caller`, `correction_attempts`, `wait_until` |
+| `SendingCallCorrection` | Station is sending callsign correction | `caller`, `correction_attempts` |
 | `WaitingForCallCorrection` | Waiting for user to fix callsign and resend | `caller`, `correction_attempts` |
 
 ### Caller AGN Phase (Station Requests Repeat)
@@ -177,15 +177,14 @@ StationsCalling
                                ▼ [250ms elapsed]
                           SendingCallCorrection
                                │
-                               ├─[CallOnly type]─► WaitingForCallCorrection
-                               │                        │
-                               │                        ├─[Enter (correct)]─► SendingExchange
-                               │                        │
-                               │                        ├─[Enter (still wrong, attempts < max)]─► (repeat correction)
-                               │                        │
-                               │                        └─[Enter (still wrong, attempts >= max)]─► SendingExchange
+                               ▼
+                          WaitingForCallCorrection
                                │
-                               └─[CallAndExchange type]─► ReceivingExchange
+                               ├─[Enter (correct)]─► SendingExchange
+                               │
+                               ├─[Enter (still wrong, attempts < max)]─► (repeat correction)
+                               │
+                               └─[Enter (still wrong, attempts >= max)]─► SendingExchange
 ```
 
 Note: Call correction only triggers ~80% of the time when callsign is wrong. Otherwise proceeds directly to `SendingExchange`.
@@ -289,9 +288,7 @@ When a user submits an incorrect callsign, correction behavior is probabilistic:
 
 1. **Correction Decision**: 80% chance the station corrects, 20% just proceeds (busted call)
 
-2. **Correction Format** (when correcting):
-   - 85%: `CallOnly` - sends callsign twice ("W1ABC W1ABC")
-   - 15%: `CallAndExchange` - sends callsign + exchange ("W1ABC 5NN 123")
+2. **Correction Format**: Station sends their callsign once (75%) or twice for emphasis (25%)
 
 3. **Max Attempts**: Station will try to correct up to 2 times before giving up
 
@@ -328,7 +325,6 @@ retry_delay_max_ms = 1200
 ```toml
 [simulation.call_correction]
 correction_probability = 0.8
-call_only_probability = 0.85
 max_correction_attempts = 2
 ```
 

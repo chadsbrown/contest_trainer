@@ -75,13 +75,11 @@ pub enum ContestState {
     /// Station is sending callsign correction (user had wrong call)
     SendingCallCorrection {
         caller: ActiveCaller,
-        correction_type: CallCorrectionType,
         correction_attempts: u8,
     },
     /// Brief pause before station sends call correction
     WaitingToSendCallCorrection {
         caller: ActiveCaller,
-        correction_type: CallCorrectionType,
         correction_attempts: u8,
         wait_until: Instant,
     },
@@ -93,18 +91,8 @@ pub enum ContestState {
     /// User is sending exchange but callsign was wrong - will trigger correction
     SendingExchangeWillCorrect {
         caller: ActiveCaller,
-        correction_type: CallCorrectionType,
         correction_attempts: u8,
     },
-}
-
-/// Type of call correction the station will send
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum CallCorrectionType {
-    /// Station sends just their callsign
-    CallOnly,
-    /// Station sends callsign followed by exchange
-    CallAndExchange,
 }
 
 #[derive(Clone, Debug)]
@@ -465,20 +453,11 @@ impl ContestApp {
                         && correction_attempts < settings.max_correction_attempts;
 
                     if should_correct {
-                        // Caller will correct - determine correction type
-                        let correction_type = if rng.gen::<f32>() < settings.call_only_probability {
-                            CallCorrectionType::CallOnly
-                        } else {
-                            CallCorrectionType::CallAndExchange
-                        };
-
-                        // Send our exchange (with wrong call) first
+                        // Caller will correct - send our exchange first, then they'll correct
                         self.send_exchange(&entered_call);
 
-                        // Wait for our exchange to finish, then caller corrects
                         self.state = ContestState::SendingExchangeWillCorrect {
                             caller,
-                            correction_type,
                             correction_attempts: correction_attempts + 1,
                         };
                         self.current_field = InputField::Exchange;
@@ -514,17 +493,10 @@ impl ContestApp {
                     && attempts < settings.max_correction_attempts;
 
                 if should_correct_again {
-                    let correction_type = if rng.gen::<f32>() < settings.call_only_probability {
-                        CallCorrectionType::CallOnly
-                    } else {
-                        CallCorrectionType::CallAndExchange
-                    };
-
                     self.send_exchange(&entered_call);
 
                     self.state = ContestState::SendingExchangeWillCorrect {
                         caller,
-                        correction_type,
                         correction_attempts: attempts + 1,
                     };
                     self.current_field = InputField::Exchange;
@@ -670,28 +642,16 @@ impl ContestApp {
                     // If station finished sending call correction
                     if let ContestState::SendingCallCorrection {
                         ref caller,
-                        correction_type,
                         correction_attempts,
                     } = self.state
                     {
                         if caller.params.id == id {
                             let caller = caller.clone();
-                            let correction_type = correction_type;
-                            let correction_attempts = correction_attempts;
-
-                            match correction_type {
-                                CallCorrectionType::CallOnly => {
-                                    // Wait for user to correct callsign and resend
-                                    self.state = ContestState::WaitingForCallCorrection {
-                                        caller,
-                                        correction_attempts,
-                                    };
-                                }
-                                CallCorrectionType::CallAndExchange => {
-                                    // Caller sent call + exchange, go to receiving exchange
-                                    self.state = ContestState::ReceivingExchange { caller };
-                                }
-                            }
+                            // Wait for user to correct callsign and resend
+                            self.state = ContestState::WaitingForCallCorrection {
+                                caller,
+                                correction_attempts,
+                            };
                         }
                     }
                 }
@@ -738,17 +698,14 @@ impl ContestApp {
                         }
                         ContestState::SendingExchangeWillCorrect {
                             caller,
-                            correction_type,
                             correction_attempts,
                         } => {
                             // User's exchange finished, now wait briefly before caller corrects
                             let caller = caller.clone();
-                            let correction_type = *correction_type;
                             let correction_attempts = *correction_attempts;
                             let wait_until = Instant::now() + std::time::Duration::from_millis(250);
                             self.state = ContestState::WaitingToSendCallCorrection {
                                 caller,
-                                correction_type,
                                 correction_attempts,
                                 wait_until,
                             };
@@ -941,33 +898,20 @@ impl ContestApp {
 
         if let ContestState::WaitingToSendCallCorrection {
             caller,
-            correction_type,
             correction_attempts,
             wait_until,
         } = &self.state
         {
             if Instant::now() >= *wait_until {
                 let caller = caller.clone();
-                let correction_type = *correction_type;
                 let correction_attempts = *correction_attempts;
                 let mut rng = rand::thread_rng();
 
-                // Station sends correction based on type
-                let message = match correction_type {
-                    CallCorrectionType::CallOnly => {
-                        // Send callsign once (75%) or twice (25%) for emphasis
-                        if rng.gen::<f32>() < 0.75 {
-                            caller.params.callsign.clone()
-                        } else {
-                            format!("{} {}", caller.params.callsign, caller.params.callsign)
-                        }
-                    }
-                    CallCorrectionType::CallAndExchange => {
-                        // Send callsign + exchange
-                        let exchange_str =
-                            self.contest.format_sent_exchange(&caller.params.exchange);
-                        format!("{} {}", caller.params.callsign, exchange_str)
-                    }
+                // Send callsign once (75%) or twice (25%) for emphasis
+                let message = if rng.gen::<f32>() < 0.75 {
+                    caller.params.callsign.clone()
+                } else {
+                    format!("{} {}", caller.params.callsign, caller.params.callsign)
                 };
 
                 let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
@@ -981,7 +925,6 @@ impl ContestApp {
 
                 self.state = ContestState::SendingCallCorrection {
                     caller,
-                    correction_type,
                     correction_attempts,
                 };
             }

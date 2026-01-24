@@ -108,8 +108,6 @@ pub struct SimulationSettings {
 pub struct CallCorrectionSettings {
     /// Probability caller will correct a busted callsign (vs just proceeding)
     pub correction_probability: f32,
-    /// When correcting, probability of sending call only (vs call+exchange)
-    pub call_only_probability: f32,
     /// Max times caller will try to correct before giving up
     pub max_correction_attempts: u8,
 }
@@ -185,7 +183,7 @@ impl Default for NoiseSettings {
             crash_intensity: 0.2,
             pop_rate: 0.6,
             pop_intensity: 0.73,
-            qrn_intensity: 0.4,
+            qrn_intensity: 0.3,
         }
     }
 }
@@ -194,7 +192,7 @@ impl Default for QsbSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            depth: 0.7,
+            depth: 0.5,
             rate: 4.0, // 6 cycles per minute = 10 second period
         }
     }
@@ -223,7 +221,6 @@ impl Default for CallCorrectionSettings {
     fn default() -> Self {
         Self {
             correction_probability: 0.8,
-            call_only_probability: 0.85,
             max_correction_attempts: 2,
         }
     }

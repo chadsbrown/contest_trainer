@@ -236,9 +236,7 @@ When you enter the wrong callsign for a station, the calling station may or may 
 - **~80% of the time**: The station will send a correction
 - **~20% of the time**: The station will just proceed with the wrong call (you'll get a "busted call" penalty)
 
-When a station does correct you, they use one of two formats:
-- **~85% of corrections**: Send their callsign twice for emphasis (e.g., "W1ABC W1ABC")
-- **~15% of corrections**: Send their callsign once followed by their exchange (e.g., "W1ABC 5NN 123")
+When a station corrects you, they send their callsign once (75%) or twice for emphasis (25%), e.g., "W1ABC W1ABC".
 
 A station will attempt to correct you up to 2 times before giving up.
 
