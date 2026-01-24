@@ -184,7 +184,7 @@ Each phase is self-contained with a clear verification step. Can be completed ac
 
 ---
 
-### Phase 2: Independent Noise Per Radio
+[x] Phase 2: Independent Noise Per Radio (completed)
 **Goal**: Each radio has its own noise generator
 
 **Changes**:
@@ -199,7 +199,7 @@ Each phase is self-contained with a clear verification step. Can be completed ac
 
 ---
 
-### Phase 3: 2BSIQ Settings & Mode Toggle
+[x] Phase 3: 2BSIQ Settings & Mode Toggle (completed)
 **Goal**: Add configuration to enable 2BSIQ mode
 
 **Changes**:

@@ -20,6 +20,12 @@ pub struct UserSettings {
     pub agn_message: String,
     #[serde(default = "default_true")]
     pub show_status_line: bool,
+    /// Enable 2BSIQ (two radio) mode
+    #[serde(default)]
+    pub two_bsiq_enabled: bool,
+    /// Latch mode: during TX, hear the other radio in both ears
+    #[serde(default)]
+    pub latch_mode: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -146,6 +152,8 @@ impl Default for UserSettings {
             font_size: 14.0,
             agn_message: "?".to_string(),
             show_status_line: true,
+            two_bsiq_enabled: false,
+            latch_mode: false,
         }
     }
 }

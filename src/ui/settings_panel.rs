@@ -105,6 +105,39 @@ pub fn render_settings_panel(
 
         ui.add_space(8.0);
 
+        // 2BSIQ Settings
+        egui::CollapsingHeader::new(RichText::new("2BSIQ Settings").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                if ui
+                    .checkbox(&mut settings.user.two_bsiq_enabled, "Enable 2BSIQ Mode")
+                    .on_hover_text("Two radio mode: Radio 1 in left ear, Radio 2 in right ear")
+                    .changed()
+                {
+                    *settings_changed = true;
+                }
+
+                if settings.user.two_bsiq_enabled {
+                    ui.add_space(4.0);
+                    if ui
+                        .checkbox(&mut settings.user.latch_mode, "Latch Mode")
+                        .on_hover_text("During TX on one radio, hear the other radio in both ears")
+                        .changed()
+                    {
+                        *settings_changed = true;
+                    }
+
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Keyboard Controls:").italics());
+                    ui.label("  Pause - Swap radios");
+                    ui.label("  ` (backtick) - Toggle stereo");
+                    ui.label("  Ctrl+Left/Right - Select radio");
+                    ui.label("  Ctrl+Fn - Send on other radio");
+                }
+            });
+
+        ui.add_space(8.0);
+
         // Contest Settings
         egui::CollapsingHeader::new(RichText::new("Contest Settings").strong())
             .default_open(true)
