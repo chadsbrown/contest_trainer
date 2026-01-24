@@ -233,7 +233,7 @@ Each phase is self-contained with a clear verification step. Can be completed ac
 
 ---
 
-### Phase 5: Dual Caller Management
+[x] Phase 5: Dual Caller Management (completed)
 **Goal**: Each radio has independent caller pool
 
 **Changes**:
@@ -249,7 +249,7 @@ Each phase is self-contained with a clear verification step. Can be completed ac
 
 ---
 
-### Phase 6: Basic Dual Radio UI
+[x] Phase 6: Basic Dual Radio UI (completed)
 **Goal**: Display both radios side-by-side
 
 **Changes**:

@@ -1,11 +1,20 @@
-use crate::app::{ContestApp, ContestState, InputField, Score};
+use crate::app::{ContestApp, ContestState, InputField, RadioId, RadioState, Score};
 use egui::{Color32, RichText, Vec2};
 
 pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
-    // Contest type display
+    // Contest type display with 2BSIQ indicator
     ui.horizontal(|ui| {
         ui.label(RichText::new("Contest:").strong());
         ui.label(app.settings.contest.contest_type.display_name());
+
+        if app.settings.user.two_bsiq_enabled {
+            ui.add_space(20.0);
+            ui.label(
+                RichText::new("[2BSIQ Mode]")
+                    .color(Color32::LIGHT_BLUE)
+                    .strong(),
+            );
+        }
     });
 
     ui.add_space(4.0);
@@ -17,26 +26,40 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     ui.separator();
     ui.add_space(8.0);
 
-    // Status indicator
-    if app.settings.user.show_status_line {
-        render_status(ui, &app.state);
-        ui.add_space(12.0);
+    if app.settings.user.two_bsiq_enabled {
+        // 2BSIQ mode: show two radio panels side by side
+        render_dual_radio_panels(ui, app);
+    } else {
+        // Single radio mode (original behavior)
+        render_single_radio_panel(ui, app);
     }
 
-    // Input fields
-    render_input_fields(ui, app);
-
-    ui.add_space(12.0);
+    ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);
 
     // Function key hints
     render_key_hints(ui);
 
+    // 2BSIQ-specific key hints
+    if app.settings.user.two_bsiq_enabled {
+        ui.add_space(4.0);
+        render_2bsiq_key_hints(ui, app.stereo_enabled, app.focused_radio);
+    }
+
     ui.add_space(8.0);
 
-    // Last QSO info
-    if let Some(ref last) = app.last_qso_result {
+    // Last QSO info (show from focused radio in 2BSIQ mode)
+    let last_qso = if app.settings.user.two_bsiq_enabled {
+        match app.focused_radio {
+            RadioId::Radio1 => app.radio1.last_qso_result.as_ref(),
+            RadioId::Radio2 => app.radio2.last_qso_result.as_ref(),
+        }
+    } else {
+        app.last_qso_result.as_ref()
+    };
+
+    if let Some(last) = last_qso {
         render_last_qso(ui, last);
     }
 
@@ -67,6 +90,186 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
         if ui.button("Session Stats").clicked() {
             app.show_stats = !app.show_stats;
         }
+    });
+}
+
+/// Render the original single-radio panel
+fn render_single_radio_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
+    // Status indicator
+    if app.settings.user.show_status_line {
+        render_status(ui, &app.state);
+        ui.add_space(12.0);
+    }
+
+    // Input fields
+    render_input_fields(ui, app);
+
+    ui.add_space(12.0);
+    ui.separator();
+}
+
+/// Render dual radio panels for 2BSIQ mode
+fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
+    ui.horizontal(|ui| {
+        // Radio 1 panel (left)
+        let r1_focused = app.focused_radio == RadioId::Radio1;
+        render_radio_panel(
+            ui,
+            RadioId::Radio1,
+            &app.radio1,
+            r1_focused,
+            app.settings.user.show_status_line,
+            app.show_settings,
+            &app.settings.contest.contest_type,
+        );
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(16.0);
+
+        // Radio 2 panel (right)
+        let r2_focused = app.focused_radio == RadioId::Radio2;
+        render_radio_panel(
+            ui,
+            RadioId::Radio2,
+            &app.radio2,
+            r2_focused,
+            app.settings.user.show_status_line,
+            app.show_settings,
+            &app.settings.contest.contest_type,
+        );
+    });
+
+    ui.add_space(12.0);
+    ui.separator();
+}
+
+/// Render a single radio panel for 2BSIQ mode
+fn render_radio_panel(
+    ui: &mut egui::Ui,
+    radio_id: RadioId,
+    radio_state: &RadioState,
+    is_focused: bool,
+    show_status: bool,
+    settings_open: bool,
+    contest_type: &crate::contest::ContestType,
+) {
+    let panel_width = 280.0;
+
+    // Create a frame with highlighting for focused radio
+    let frame = if is_focused {
+        egui::Frame::new()
+            .fill(ui.visuals().faint_bg_color)
+            .inner_margin(8.0)
+            .corner_radius(4.0)
+    } else {
+        egui::Frame::new().inner_margin(8.0)
+    };
+
+    frame.show(ui, |ui| {
+        ui.set_min_width(panel_width);
+
+        // Radio header with focus indicator
+        ui.horizontal(|ui| {
+            let (label, channel) = match radio_id {
+                RadioId::Radio1 => ("RADIO 1", "(Left)"),
+                RadioId::Radio2 => ("RADIO 2", "(Right)"),
+            };
+
+            if is_focused {
+                ui.label(RichText::new("▶").color(Color32::GREEN));
+            } else {
+                ui.label(RichText::new(" ").monospace());
+            }
+
+            ui.label(RichText::new(label).strong());
+            ui.label(RichText::new(channel).weak().small());
+        });
+
+        ui.add_space(4.0);
+
+        // Status indicator
+        if show_status {
+            render_status(ui, &radio_state.state);
+            ui.add_space(8.0);
+        }
+
+        // Input fields (read-only display in 2BSIQ mode for now)
+        render_radio_input_fields(ui, radio_state, is_focused, settings_open, contest_type);
+    });
+}
+
+/// Render input fields for a radio in 2BSIQ mode
+fn render_radio_input_fields(
+    ui: &mut egui::Ui,
+    radio_state: &RadioState,
+    _is_focused: bool,
+    _settings_open: bool,
+    contest_type: &crate::contest::ContestType,
+) {
+    // For now, display the current values (editing will come in later phases)
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Call:").strong());
+        let call_display = if radio_state.callsign_input.is_empty() {
+            "________".to_string()
+        } else {
+            format!("{:8}", radio_state.callsign_input)
+        };
+        ui.label(RichText::new(call_display).monospace());
+    });
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Exch:").strong());
+        let exch_display = if radio_state.exchange_input.is_empty() {
+            "________".to_string()
+        } else {
+            format!("{:8}", radio_state.exchange_input)
+        };
+        ui.label(RichText::new(exch_display).monospace());
+    });
+
+    // Show exchange format hint
+    ui.horizontal(|ui| {
+        let hint = match contest_type {
+            crate::contest::ContestType::CqWw => "RST ZONE",
+            crate::contest::ContestType::Sweepstakes => "NR PREC CK SEC",
+            crate::contest::ContestType::Cwt => "NAME NUM",
+        };
+        ui.label(RichText::new(hint).small().weak());
+    });
+}
+
+/// Render 2BSIQ-specific key hints
+fn render_2bsiq_key_hints(ui: &mut egui::Ui, stereo_enabled: bool, focused_radio: RadioId) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Pause").strong().monospace());
+        ui.label("Swap");
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("`").strong().monospace());
+        ui.label("Stereo");
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("Ctrl+←/→").strong().monospace());
+        ui.label("Focus");
+        ui.add_space(16.0);
+
+        // Status indicators
+        let stereo_text = if stereo_enabled { "STEREO" } else { "MONO" };
+        let stereo_color = if stereo_enabled {
+            Color32::GREEN
+        } else {
+            Color32::YELLOW
+        };
+        ui.label(RichText::new(format!("[{}]", stereo_text)).color(stereo_color));
+
+        ui.add_space(8.0);
+
+        let focus_text = match focused_radio {
+            RadioId::Radio1 => "R1",
+            RadioId::Radio2 => "R2",
+        };
+        ui.label(RichText::new(format!("[Focus: {}]", focus_text)).color(Color32::LIGHT_BLUE));
     });
 }
 
