@@ -127,6 +127,81 @@ pub struct ActiveCaller {
     pub params: StationParams,
 }
 
+/// Identifies which radio in 2BSIQ mode
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RadioId {
+    Radio1, // Left channel
+    Radio2, // Right channel
+}
+
+impl RadioId {
+    /// Get the radio index for audio routing (0 = left, 1 = right)
+    pub fn audio_index(&self) -> u8 {
+        match self {
+            RadioId::Radio1 => 0,
+            RadioId::Radio2 => 1,
+        }
+    }
+
+    /// Get the other radio
+    pub fn other(&self) -> RadioId {
+        match self {
+            RadioId::Radio1 => RadioId::Radio2,
+            RadioId::Radio2 => RadioId::Radio1,
+        }
+    }
+}
+
+/// State for a single radio in 2BSIQ mode
+#[derive(Clone, Debug)]
+pub struct RadioState {
+    pub state: ContestState,
+    pub callsign_input: String,
+    pub exchange_input: String,
+    pub current_field: InputField,
+    pub last_qso_result: Option<QsoResult>,
+    pub last_cq_finished: Option<Instant>,
+    /// Current TX message being sent (for visual indicator)
+    pub current_tx_message: Option<String>,
+    /// AGN usage tracking for current QSO
+    pub used_agn_callsign: bool,
+    pub used_agn_exchange: bool,
+}
+
+impl RadioState {
+    pub fn new() -> Self {
+        Self {
+            state: ContestState::Idle,
+            callsign_input: String::new(),
+            exchange_input: String::new(),
+            current_field: InputField::Callsign,
+            last_qso_result: None,
+            last_cq_finished: None,
+            current_tx_message: None,
+            used_agn_callsign: false,
+            used_agn_exchange: false,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.state = ContestState::Idle;
+        self.callsign_input.clear();
+        self.exchange_input.clear();
+        self.current_field = InputField::Callsign;
+        self.last_qso_result = None;
+        self.last_cq_finished = None;
+        self.current_tx_message = None;
+        self.used_agn_callsign = false;
+        self.used_agn_exchange = false;
+    }
+}
+
+impl Default for RadioState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct QsoResult {
     pub callsign: String,
@@ -206,6 +281,16 @@ pub struct ContestApp {
     // File dialog for settings
     file_dialog: FileDialog,
     file_dialog_target: Option<FileDialogTarget>,
+
+    // 2BSIQ mode state
+    /// Radio 1 state (left channel)
+    pub radio1: RadioState,
+    /// Radio 2 state (right channel)
+    pub radio2: RadioState,
+    /// Which radio currently has keyboard focus
+    pub focused_radio: RadioId,
+    /// Whether stereo separation is enabled (vs focused radio to both ears)
+    pub stereo_enabled: bool,
 }
 
 impl ContestApp {
@@ -274,6 +359,11 @@ impl ContestApp {
             used_agn_exchange: false,
             file_dialog: FileDialog::new(),
             file_dialog_target: None,
+            // 2BSIQ mode - initialize both radios
+            radio1: RadioState::new(),
+            radio2: RadioState::new(),
+            focused_radio: RadioId::Radio1,
+            stereo_enabled: true,
         }
     }
 
