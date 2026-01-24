@@ -885,6 +885,7 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
+                        radio_index: 0,
                     }));
 
                     self.state = ContestState::CallerRequestingAgn { caller };
@@ -899,6 +900,7 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
+                        radio_index: 0,
                     }));
 
                     self.state = ContestState::ReceivingExchange { caller };
@@ -922,6 +924,7 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
+                    radio_index: 0,
                 }));
 
                 self.state = ContestState::ReceivingExchange { caller };
@@ -947,6 +950,7 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
+                        radio_index: 0,
                     }));
                 }
 
@@ -979,6 +983,7 @@ impl ContestApp {
                             frequency_offset_hz: caller.params.frequency_offset_hz,
                             wpm: caller.params.wpm,
                             amplitude: caller.params.amplitude,
+                            radio_index: 0,
                         }));
                     }
 
@@ -1017,6 +1022,7 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
+                    radio_index: 0,
                 }));
 
                 self.state = ContestState::SendingCallCorrection {
@@ -1046,6 +1052,7 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
+                    radio_index: 0,
                 }));
 
                 // Track that station is sending callsign repeat, will return to WaitingForCallCorrection when done
@@ -1076,6 +1083,7 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
+                    radio_index: 0,
                 }));
 
                 // Track that station is sending callsign, will return to WaitingForCallCorrection when done

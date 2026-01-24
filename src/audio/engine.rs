@@ -79,24 +79,46 @@ impl AudioEngine {
         device.build_output_stream(
             config,
             move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                // Create a mono buffer
                 let num_frames = data.len() / channels;
-                let mut mono_buffer = vec![0.0f32; num_frames];
 
-                // Fill the mono buffer
-                let (completed_stations, user_completed) = {
-                    let mut mixer = mixer.lock().unwrap();
-                    mixer.fill_buffer(&mut mono_buffer)
-                };
+                let (completed_stations, user_completed) = if channels == 2 {
+                    // Stereo output: use stereo mixer for proper L/R separation
+                    let mut stereo_buffer = vec![0.0f32; num_frames * 2];
 
-                // Convert to output format (duplicate mono to all channels)
-                for (frame_idx, frame) in data.chunks_mut(channels).enumerate() {
-                    let sample = mono_buffer.get(frame_idx).copied().unwrap_or(0.0);
-                    let converted: T = T::from_sample(sample);
-                    for channel_sample in frame.iter_mut() {
-                        *channel_sample = converted;
+                    let result = {
+                        let mut mixer = mixer.lock().unwrap();
+                        mixer.fill_stereo_buffer(&mut stereo_buffer)
+                    };
+
+                    // Convert interleaved stereo to output format
+                    for (frame_idx, frame) in data.chunks_mut(2).enumerate() {
+                        let left = stereo_buffer.get(frame_idx * 2).copied().unwrap_or(0.0);
+                        let right = stereo_buffer.get(frame_idx * 2 + 1).copied().unwrap_or(0.0);
+                        frame[0] = T::from_sample(left);
+                        frame[1] = T::from_sample(right);
                     }
-                }
+
+                    result
+                } else {
+                    // Mono or multi-channel: use mono mixer and duplicate
+                    let mut mono_buffer = vec![0.0f32; num_frames];
+
+                    let result = {
+                        let mut mixer = mixer.lock().unwrap();
+                        mixer.fill_buffer(&mut mono_buffer)
+                    };
+
+                    // Convert to output format (duplicate mono to all channels)
+                    for (frame_idx, frame) in data.chunks_mut(channels).enumerate() {
+                        let sample = mono_buffer.get(frame_idx).copied().unwrap_or(0.0);
+                        let converted: T = T::from_sample(sample);
+                        for channel_sample in frame.iter_mut() {
+                            *channel_sample = converted;
+                        }
+                    }
+
+                    result
+                };
 
                 // Send completion events
                 for station_id in completed_stations {

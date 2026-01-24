@@ -14,6 +14,8 @@ pub struct StationParams {
     pub frequency_offset_hz: f32,
     pub wpm: u8,
     pub amplitude: f32,
+    /// Radio index for 2BSIQ mode: 0 = Radio 1 (left), 1 = Radio 2 (right)
+    pub radio_index: u8,
 }
 
 /// Messages from UI thread to Audio thread

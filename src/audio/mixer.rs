@@ -99,6 +99,8 @@ pub struct ActiveStation {
     pub amplitude: f32,
     pub completed: bool,
     pub qsb: QsbOscillator,
+    /// Radio index for stereo routing: 0 = left channel, 1 = right channel
+    pub radio_index: u8,
 }
 
 impl ActiveStation {
@@ -132,6 +134,7 @@ impl ActiveStation {
             amplitude: params.amplitude,
             completed: false,
             qsb: QsbOscillator::new(sample_rate, qsb_settings),
+            radio_index: params.radio_index,
         }
     }
 
@@ -315,7 +318,7 @@ impl Mixer {
         self.user_station = None;
     }
 
-    /// Fill a buffer with mixed audio, returns list of completed station IDs
+    /// Fill a buffer with mixed audio (mono), returns list of completed station IDs
     pub fn fill_buffer(&mut self, buffer: &mut [f32]) -> (Vec<StationId>, bool) {
         let mut completed_stations = Vec::new();
         let mut user_completed = false;
@@ -365,6 +368,83 @@ impl Mixer {
         }
 
         // Apply master volume, dither, and soft clipping
+        let mut rng = rand::thread_rng();
+        for sample in buffer.iter_mut() {
+            *sample *= self.settings.master_volume;
+            // Add very small triangular dither to prevent audio artifacts
+            let dither = (rng.gen::<f32>() - 0.5) * 0.001;
+            *sample += dither;
+            // Soft clipping using tanh
+            if sample.abs() > 0.8 {
+                *sample = sample.signum() * (0.8 + 0.2 * ((*sample).abs() - 0.8).tanh());
+            }
+        }
+
+        (completed_stations, user_completed)
+    }
+
+    /// Fill a buffer with mixed stereo audio (interleaved L/R pairs)
+    /// Stations are routed based on radio_index: 0 = left, 1 = right
+    /// Returns list of completed station IDs and whether user message completed
+    pub fn fill_stereo_buffer(&mut self, buffer: &mut [f32]) -> (Vec<StationId>, bool) {
+        let mut completed_stations = Vec::new();
+        let mut user_completed = false;
+
+        // Buffer is interleaved stereo: [L0, R0, L1, R1, ...]
+        let num_frames = buffer.len() / 2;
+
+        // Clear buffer
+        for sample in buffer.iter_mut() {
+            *sample = 0.0;
+        }
+
+        // Add noise to both channels (optionally muted while user is transmitting)
+        let mute_noise = self.settings.mute_noise_during_tx && self.user_station.is_some();
+        if !mute_noise {
+            for frame_idx in 0..num_frames {
+                let noise_sample = self
+                    .noise
+                    .next_sample(self.settings.noise_level, &self.settings.noise);
+                buffer[frame_idx * 2] += noise_sample; // Left
+                buffer[frame_idx * 2 + 1] += noise_sample; // Right
+            }
+        }
+
+        // Mix each calling station to appropriate channel based on radio_index
+        for station in &mut self.stations {
+            let channel_offset = station.radio_index as usize; // 0 = left, 1 = right
+            for frame_idx in 0..num_frames {
+                if let Some(station_sample) = station.next_sample() {
+                    buffer[frame_idx * 2 + channel_offset] += station_sample;
+                } else {
+                    break;
+                }
+            }
+            if station.is_completed() {
+                completed_stations.push(station.id);
+            }
+        }
+
+        // Remove completed stations
+        self.stations.retain(|s| !s.is_completed());
+
+        // Mix user station to both channels (sidetone)
+        if let Some(ref mut user) = self.user_station {
+            for frame_idx in 0..num_frames {
+                if let Some(user_sample) = user.next_sample() {
+                    buffer[frame_idx * 2] += user_sample; // Left
+                    buffer[frame_idx * 2 + 1] += user_sample; // Right
+                } else {
+                    break;
+                }
+            }
+            if user.is_completed() {
+                user_completed = true;
+                self.user_station = None;
+            }
+        }
+
+        // Apply master volume, dither, and soft clipping to all samples
         let mut rng = rand::thread_rng();
         for sample in buffer.iter_mut() {
             *sample *= self.settings.master_volume;

@@ -268,6 +268,7 @@ impl CallerManager {
                 frequency_offset_hz: freq_offset,
                 wpm,
                 amplitude,
+                radio_index: 0,
             },
             patience,
             attempts: 0,
