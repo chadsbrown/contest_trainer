@@ -417,6 +417,14 @@ impl ContestApp {
             .send(AudioCommand::UpdateSettings(self.settings.audio.clone()));
     }
 
+    /// Send stereo mode update to audio engine (for 2BSIQ mode)
+    fn send_stereo_mode_update(&self) {
+        let _ = self.cmd_tx.send(AudioCommand::UpdateStereoMode {
+            stereo_enabled: self.stereo_enabled,
+            focused_radio: self.focused_radio.audio_index(),
+        });
+    }
+
     fn send_cq(&mut self) {
         let cq_prefix = self.settings.contest.cq_message.trim();
         let callsign = self.settings.user.callsign.trim();
@@ -1247,22 +1255,26 @@ impl ContestApp {
                 // Insert key - Swap radios (Pause key not available in egui)
                 if i.key_pressed(Key::Insert) {
                     self.focused_radio = self.focused_radio.other();
+                    self.send_stereo_mode_update();
                 }
 
                 // Backtick (`) - Toggle stereo mode
                 if i.key_pressed(Key::Backtick) {
                     self.stereo_enabled = !self.stereo_enabled;
+                    self.send_stereo_mode_update();
                 }
 
                 // Ctrl+Left Arrow - Focus Radio 1 (left)
                 if i.modifiers.ctrl && i.key_pressed(Key::ArrowLeft) {
                     self.focused_radio = RadioId::Radio1;
+                    self.send_stereo_mode_update();
                     return; // Don't process as WPM change
                 }
 
                 // Ctrl+Right Arrow - Focus Radio 2 (right)
                 if i.modifiers.ctrl && i.key_pressed(Key::ArrowRight) {
                     self.focused_radio = RadioId::Radio2;
+                    self.send_stereo_mode_update();
                     return; // Don't process as anything else
                 }
             }

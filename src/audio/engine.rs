@@ -158,6 +158,12 @@ impl AudioEngine {
                         AudioCommand::StopAll => {
                             mixer.clear_all();
                         }
+                        AudioCommand::UpdateStereoMode {
+                            stereo_enabled,
+                            focused_radio,
+                        } => {
+                            mixer.update_stereo_mode(stereo_enabled, focused_radio);
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,

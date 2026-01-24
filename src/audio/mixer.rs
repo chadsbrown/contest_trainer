@@ -269,6 +269,10 @@ pub struct Mixer {
     /// Noise generator for Radio 2 (right channel) in stereo mode
     pub noise_right: NoiseGenerator,
     pub settings: AudioSettings,
+    /// 2BSIQ: Whether stereo separation is enabled (true = L/R split, false = focused to both ears)
+    pub stereo_enabled: bool,
+    /// 2BSIQ: Which radio is focused (0 = Radio 1/left, 1 = Radio 2/right)
+    pub focused_radio: u8,
 }
 
 impl Mixer {
@@ -279,7 +283,15 @@ impl Mixer {
             noise: NoiseGenerator::new(sample_rate),
             noise_right: NoiseGenerator::new(sample_rate),
             settings,
+            stereo_enabled: true,
+            focused_radio: 0,
         }
+    }
+
+    /// Update 2BSIQ stereo routing mode
+    pub fn update_stereo_mode(&mut self, stereo_enabled: bool, focused_radio: u8) {
+        self.stereo_enabled = stereo_enabled;
+        self.focused_radio = focused_radio;
     }
 
     /// Add a new calling station
@@ -390,7 +402,8 @@ impl Mixer {
     }
 
     /// Fill a buffer with mixed stereo audio (interleaved L/R pairs)
-    /// Stations are routed based on radio_index: 0 = left, 1 = right
+    /// When stereo_enabled: stations routed based on radio_index (0 = left, 1 = right)
+    /// When !stereo_enabled: focused radio goes to both ears
     /// Returns list of completed station IDs and whether user message completed
     pub fn fill_stereo_buffer(&mut self, buffer: &mut [f32]) -> (Vec<StationId>, bool) {
         let mut completed_stations = Vec::new();
@@ -404,30 +417,62 @@ impl Mixer {
             *sample = 0.0;
         }
 
-        // Add independent noise to each channel (optionally muted while user is transmitting)
+        // Add noise based on stereo mode
         let mute_noise = self.settings.mute_noise_during_tx && self.user_station.is_some();
         if !mute_noise {
-            for frame_idx in 0..num_frames {
-                // Independent noise generators for each radio/channel
-                let noise_left = self
-                    .noise
-                    .next_sample(self.settings.noise_level, &self.settings.noise);
-                let noise_right = self
-                    .noise_right
-                    .next_sample(self.settings.noise_level, &self.settings.noise);
-                buffer[frame_idx * 2] += noise_left; // Left (Radio 1)
-                buffer[frame_idx * 2 + 1] += noise_right; // Right (Radio 2)
+            if self.stereo_enabled {
+                // Stereo mode: independent noise per channel
+                for frame_idx in 0..num_frames {
+                    let noise_left = self
+                        .noise
+                        .next_sample(self.settings.noise_level, &self.settings.noise);
+                    let noise_right = self
+                        .noise_right
+                        .next_sample(self.settings.noise_level, &self.settings.noise);
+                    buffer[frame_idx * 2] += noise_left; // Left (Radio 1)
+                    buffer[frame_idx * 2 + 1] += noise_right; // Right (Radio 2)
+                }
+            } else {
+                // Mono mode: focused radio's noise to both ears
+                for frame_idx in 0..num_frames {
+                    let noise_sample = if self.focused_radio == 0 {
+                        self.noise
+                            .next_sample(self.settings.noise_level, &self.settings.noise)
+                    } else {
+                        self.noise_right
+                            .next_sample(self.settings.noise_level, &self.settings.noise)
+                    };
+                    buffer[frame_idx * 2] += noise_sample; // Left
+                    buffer[frame_idx * 2 + 1] += noise_sample; // Right
+                }
             }
         }
 
-        // Mix each calling station to appropriate channel based on radio_index
+        // Mix each calling station based on stereo mode
         for station in &mut self.stations {
-            let channel_offset = station.radio_index as usize; // 0 = left, 1 = right
-            for frame_idx in 0..num_frames {
-                if let Some(station_sample) = station.next_sample() {
-                    buffer[frame_idx * 2 + channel_offset] += station_sample;
-                } else {
-                    break;
+            if self.stereo_enabled {
+                // Stereo mode: route to appropriate channel based on radio_index
+                let channel_offset = station.radio_index as usize; // 0 = left, 1 = right
+                for frame_idx in 0..num_frames {
+                    if let Some(station_sample) = station.next_sample() {
+                        buffer[frame_idx * 2 + channel_offset] += station_sample;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                // Mono mode: only hear focused radio, route to both ears
+                let dominated = station.radio_index == self.focused_radio;
+                for frame_idx in 0..num_frames {
+                    if let Some(station_sample) = station.next_sample() {
+                        if dominated {
+                            buffer[frame_idx * 2] += station_sample; // Left
+                            buffer[frame_idx * 2 + 1] += station_sample; // Right
+                        }
+                        // Non-focused radio stations are silenced in mono mode
+                    } else {
+                        break;
+                    }
                 }
             }
             if station.is_completed() {
