@@ -264,7 +264,10 @@ impl UserStation {
 pub struct Mixer {
     pub stations: Vec<ActiveStation>,
     pub user_station: Option<UserStation>,
+    /// Noise generator for mono output and Radio 1 (left channel) in stereo
     pub noise: NoiseGenerator,
+    /// Noise generator for Radio 2 (right channel) in stereo mode
+    pub noise_right: NoiseGenerator,
     pub settings: AudioSettings,
 }
 
@@ -274,6 +277,7 @@ impl Mixer {
             stations: Vec::new(),
             user_station: None,
             noise: NoiseGenerator::new(sample_rate),
+            noise_right: NoiseGenerator::new(sample_rate),
             settings,
         }
     }
@@ -306,8 +310,10 @@ impl Mixer {
         for station in &mut self.stations {
             station.qsb.update_settings(&settings.qsb);
         }
-        // Update noise filter to match tone frequency and bandwidth
+        // Update noise filters to match tone frequency and bandwidth
         self.noise
+            .update_filter(settings.tone_frequency_hz, settings.noise_bandwidth);
+        self.noise_right
             .update_filter(settings.tone_frequency_hz, settings.noise_bandwidth);
         self.settings = settings;
     }
@@ -398,15 +404,19 @@ impl Mixer {
             *sample = 0.0;
         }
 
-        // Add noise to both channels (optionally muted while user is transmitting)
+        // Add independent noise to each channel (optionally muted while user is transmitting)
         let mute_noise = self.settings.mute_noise_during_tx && self.user_station.is_some();
         if !mute_noise {
             for frame_idx in 0..num_frames {
-                let noise_sample = self
+                // Independent noise generators for each radio/channel
+                let noise_left = self
                     .noise
                     .next_sample(self.settings.noise_level, &self.settings.noise);
-                buffer[frame_idx * 2] += noise_sample; // Left
-                buffer[frame_idx * 2 + 1] += noise_sample; // Right
+                let noise_right = self
+                    .noise_right
+                    .next_sample(self.settings.noise_level, &self.settings.noise);
+                buffer[frame_idx * 2] += noise_left; // Left (Radio 1)
+                buffer[frame_idx * 2 + 1] += noise_right; // Right (Radio 2)
             }
         }
 
