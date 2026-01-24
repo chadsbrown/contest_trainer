@@ -107,10 +107,21 @@ pub struct CallerManager {
 
     /// Last time we tried to add callers to the queue
     last_replenish: Instant,
+
+    /// Radio index for audio routing (0 = left/Radio1, 1 = right/Radio2)
+    radio_index: u8,
 }
 
 impl CallerManager {
     pub fn new(callsigns: CallsignPool, settings: SimulationSettings) -> Self {
+        Self::new_with_radio_index(callsigns, settings, 0)
+    }
+
+    pub fn new_with_radio_index(
+        callsigns: CallsignPool,
+        settings: SimulationSettings,
+        radio_index: u8,
+    ) -> Self {
         let pileup_settings = settings.pileup.clone();
         Self {
             callsigns: CallsignSource::Regular(callsigns),
@@ -121,10 +132,19 @@ impl CallerManager {
             queue: Vec::new(),
             active_ids: Vec::new(),
             last_replenish: Instant::now(),
+            radio_index,
         }
     }
 
     pub fn new_cwt(callsigns: CwtCallsignPool, settings: SimulationSettings) -> Self {
+        Self::new_cwt_with_radio_index(callsigns, settings, 0)
+    }
+
+    pub fn new_cwt_with_radio_index(
+        callsigns: CwtCallsignPool,
+        settings: SimulationSettings,
+        radio_index: u8,
+    ) -> Self {
         let pileup_settings = settings.pileup.clone();
         Self {
             callsigns: CallsignSource::Cwt(callsigns),
@@ -135,6 +155,7 @@ impl CallerManager {
             queue: Vec::new(),
             active_ids: Vec::new(),
             last_replenish: Instant::now(),
+            radio_index,
         }
     }
 
@@ -268,7 +289,7 @@ impl CallerManager {
                 frequency_offset_hz: freq_offset,
                 wpm,
                 amplitude,
-                radio_index: 0,
+                radio_index: self.radio_index,
             },
             patience,
             attempts: 0,

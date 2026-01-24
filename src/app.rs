@@ -256,6 +256,8 @@ pub struct ContestApp {
     // Contest and station management
     contest: Box<dyn Contest>,
     caller_manager: CallerManager,
+    /// Second caller manager for Radio 2 in 2BSIQ mode
+    caller_manager2: CallerManager,
     user_serial: u32,
     cty: CtyDat,
 
@@ -319,15 +321,35 @@ impl ContestApp {
         let cty_data = include_str!("../data/cty.dat");
         let cty = CtyDat::parse(cty_data);
 
-        // Load callsigns and create caller manager based on contest type
-        let caller_manager = if settings.contest.contest_type == ContestType::Cwt {
+        // Load callsigns and create caller managers based on contest type
+        // Radio 1 (left channel) uses radio_index 0, Radio 2 (right) uses radio_index 1
+        let (caller_manager, caller_manager2) = if settings.contest.contest_type == ContestType::Cwt
+        {
             let cwt_callsigns = CwtCallsignPool::load(&settings.contest.cwt_callsign_file)
                 .unwrap_or_else(|_| CwtCallsignPool::default_pool());
-            CallerManager::new_cwt(cwt_callsigns, settings.simulation.clone())
+            let cwt_callsigns2 = CwtCallsignPool::load(&settings.contest.cwt_callsign_file)
+                .unwrap_or_else(|_| CwtCallsignPool::default_pool());
+            (
+                CallerManager::new_cwt_with_radio_index(
+                    cwt_callsigns,
+                    settings.simulation.clone(),
+                    0,
+                ),
+                CallerManager::new_cwt_with_radio_index(
+                    cwt_callsigns2,
+                    settings.simulation.clone(),
+                    1,
+                ),
+            )
         } else {
             let callsigns = CallsignPool::load(&settings.contest.callsign_file)
                 .unwrap_or_else(|_| CallsignPool::default_pool());
-            CallerManager::new(callsigns, settings.simulation.clone())
+            let callsigns2 = CallsignPool::load(&settings.contest.callsign_file)
+                .unwrap_or_else(|_| CallsignPool::default_pool());
+            (
+                CallerManager::new_with_radio_index(callsigns, settings.simulation.clone(), 0),
+                CallerManager::new_with_radio_index(callsigns2, settings.simulation.clone(), 1),
+            )
         };
 
         let noise_enabled = settings.audio.noise_level > 0.0;
@@ -346,6 +368,7 @@ impl ContestApp {
             audio_engine,
             contest,
             caller_manager,
+            caller_manager2,
             user_serial: 1,
             cty,
             show_settings: false,
