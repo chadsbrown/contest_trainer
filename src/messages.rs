@@ -36,6 +36,11 @@ pub enum AudioCommand {
         /// Which radio is focused (0 = Radio 1/left, 1 = Radio 2/right)
         focused_radio: u8,
     },
+    /// Update 2BSIQ mode state (controls sidetone muting)
+    Update2BsiqMode {
+        /// Whether 2BSIQ mode is enabled
+        enabled: bool,
+    },
 }
 
 /// Messages from Audio thread to UI thread

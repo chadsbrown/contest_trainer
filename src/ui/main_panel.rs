@@ -110,9 +110,17 @@ fn render_single_radio_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
 
 /// Render dual radio panels for 2BSIQ mode
 fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
+    // Get TX progress once (shared across radios for now - will track per-radio later)
+    let tx_progress = app.get_tx_progress();
+
     ui.horizontal(|ui| {
         // Radio 1 panel (left)
         let r1_focused = app.focused_radio == RadioId::Radio1;
+        let r1_tx = if r1_focused {
+            tx_progress.as_ref()
+        } else {
+            None
+        };
         render_radio_panel(
             ui,
             RadioId::Radio1,
@@ -121,6 +129,7 @@ fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
             app.settings.user.show_status_line,
             app.show_settings,
             &app.settings.contest.contest_type,
+            r1_tx,
         );
 
         ui.add_space(16.0);
@@ -129,6 +138,11 @@ fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
 
         // Radio 2 panel (right)
         let r2_focused = app.focused_radio == RadioId::Radio2;
+        let r2_tx = if r2_focused {
+            tx_progress.as_ref()
+        } else {
+            None
+        };
         render_radio_panel(
             ui,
             RadioId::Radio2,
@@ -137,6 +151,7 @@ fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
             app.settings.user.show_status_line,
             app.show_settings,
             &app.settings.contest.contest_type,
+            r2_tx,
         );
     });
 
@@ -153,6 +168,7 @@ fn render_radio_panel(
     show_status: bool,
     settings_open: bool,
     contest_type: &crate::contest::ContestType,
+    tx_progress: Option<&(String, usize)>,
 ) {
     let panel_width = 280.0;
 
@@ -196,6 +212,38 @@ fn render_radio_panel(
 
         // Input fields (read-only display in 2BSIQ mode for now)
         render_radio_input_fields(ui, radio_state, is_focused, settings_open, contest_type);
+
+        // TX indicator (shows transmission progress)
+        if let Some((message, chars_sent)) = tx_progress {
+            render_tx_indicator(ui, message, *chars_sent);
+        }
+    });
+}
+
+/// Render the TX indicator showing transmission progress
+fn render_tx_indicator(ui: &mut egui::Ui, message: &str, chars_sent: usize) {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("TX:").strong().color(Color32::YELLOW));
+
+        // Show sent characters, then a cursor block for current position
+        let sent_part: String = message.chars().take(chars_sent).collect();
+        let remaining: String = message.chars().skip(chars_sent).collect();
+
+        // Build the display: sent chars in yellow, cursor block, remaining in gray
+        if !sent_part.is_empty() {
+            ui.label(RichText::new(&sent_part).monospace().color(Color32::YELLOW));
+        }
+
+        // Show cursor block at current position
+        if !remaining.is_empty() {
+            ui.label(RichText::new("▌").monospace().color(Color32::WHITE));
+            // Show remaining chars dimmed
+            let rest: String = remaining.chars().skip(1).collect();
+            if !rest.is_empty() {
+                ui.label(RichText::new(rest).monospace().color(Color32::DARK_GRAY));
+            }
+        }
     });
 }
 

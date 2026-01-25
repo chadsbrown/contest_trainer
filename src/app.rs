@@ -293,6 +293,8 @@ pub struct ContestApp {
     pub focused_radio: RadioId,
     /// Whether stereo separation is enabled (vs focused radio to both ears)
     pub stereo_enabled: bool,
+    /// Whether initial audio state has been sent to audio engine
+    audio_initialized: bool,
 }
 
 impl ContestApp {
@@ -387,6 +389,7 @@ impl ContestApp {
             radio2: RadioState::new(),
             focused_radio: RadioId::Radio1,
             stereo_enabled: true,
+            audio_initialized: false,
         }
     }
 
@@ -422,6 +425,13 @@ impl ContestApp {
         let _ = self.cmd_tx.send(AudioCommand::UpdateStereoMode {
             stereo_enabled: self.stereo_enabled,
             focused_radio: self.focused_radio.audio_index(),
+        });
+    }
+
+    /// Send 2BSIQ mode update to audio engine (controls sidetone muting)
+    fn send_2bsiq_mode_update(&self) {
+        let _ = self.cmd_tx.send(AudioCommand::Update2BsiqMode {
+            enabled: self.settings.user.two_bsiq_enabled,
         });
     }
 
@@ -658,6 +668,12 @@ impl ContestApp {
             self.used_agn_callsign = radio.used_agn_callsign;
             self.used_agn_exchange = radio.used_agn_exchange;
         }
+    }
+
+    /// Get current TX progress for visual indicator (2BSIQ mode)
+    /// Returns (message, chars_sent) if user is transmitting, None otherwise
+    pub fn get_tx_progress(&self) -> Option<(String, usize)> {
+        self.audio_engine.as_ref().and_then(|e| e.get_tx_progress())
     }
 
     fn send_cq(&mut self) {
@@ -1674,6 +1690,9 @@ impl ContestApp {
                 .cmd_tx
                 .send(AudioCommand::UpdateSettings(self.settings.audio.clone()));
 
+            // Update 2BSIQ mode for sidetone control
+            self.send_2bsiq_mode_update();
+
             // Save settings to file
             if let Err(_e) = self.settings.save() {
                 #[cfg(debug_assertions)]
@@ -1687,6 +1706,15 @@ impl ContestApp {
 
 impl eframe::App for ContestApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // One-time audio initialization on first frame
+        if !self.audio_initialized {
+            self.send_2bsiq_mode_update();
+            if self.settings.user.two_bsiq_enabled {
+                self.send_stereo_mode_update();
+            }
+            self.audio_initialized = true;
+        }
+
         // Apply font size
         ctx.style_mut(|style| {
             style.text_styles.iter_mut().for_each(|(_, font_id)| {

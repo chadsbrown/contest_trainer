@@ -137,6 +137,15 @@ impl AudioEngine {
         )
     }
 
+    /// Get current TX progress for visual indicator
+    /// Returns (message, chars_sent) if user is transmitting, None otherwise
+    pub fn get_tx_progress(&self) -> Option<(String, usize)> {
+        let mixer = self.mixer.lock().unwrap();
+        mixer
+            .get_tx_progress()
+            .map(|(msg, chars)| (msg.to_string(), chars))
+    }
+
     /// Process pending commands (call this from the main thread periodically)
     pub fn process_commands(&self) {
         loop {
@@ -163,6 +172,9 @@ impl AudioEngine {
                             focused_radio,
                         } => {
                             mixer.update_stereo_mode(stereo_enabled, focused_radio);
+                        }
+                        AudioCommand::Update2BsiqMode { enabled } => {
+                            mixer.update_2bsiq_mode(enabled);
                         }
                     }
                 }

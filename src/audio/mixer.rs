@@ -195,11 +195,16 @@ pub struct UserStation {
     pub tone_generator: ToneGenerator,
     pub timer: MorseTimer,
     pub completed: bool,
+    /// Original message for TX indicator display
+    pub message: String,
+    /// Maps element index to character index in message (for TX indicator)
+    pub element_to_char: Vec<usize>,
 }
 
 impl UserStation {
     pub fn new(message: &str, wpm: u8, sample_rate: u32, frequency_hz: f32) -> Self {
         let elements = text_to_morse(message);
+        let element_to_char = Self::build_element_to_char_map(message);
         let timer = MorseTimer::new(sample_rate, wpm);
         let mut tone_generator = ToneGenerator::new(frequency_hz, sample_rate);
         tone_generator.reset_phase();
@@ -218,7 +223,51 @@ impl UserStation {
             tone_generator,
             timer,
             completed: false,
+            message: message.to_string(),
+            element_to_char,
         }
+    }
+
+    /// Build a mapping from element index to character index
+    fn build_element_to_char_map(message: &str) -> Vec<usize> {
+        let mut map = Vec::new();
+        let mut char_idx = 0;
+
+        for ch in message.chars() {
+            if ch.is_whitespace() {
+                // Word gap maps to space character
+                map.push(char_idx);
+                char_idx += 1;
+            } else if let Some(code) = super::morse::char_to_morse(ch) {
+                // Each element of the character maps to this char index
+                for (elem_idx, _) in code.iter().enumerate() {
+                    map.push(char_idx);
+                    // Add entry for element gap (except after last element)
+                    if elem_idx < code.len() - 1 {
+                        map.push(char_idx);
+                    }
+                }
+                // Add entry for character gap (will be added after char)
+                map.push(char_idx);
+                char_idx += 1;
+            }
+        }
+        map
+    }
+
+    /// Get number of characters fully sent (for TX indicator)
+    pub fn chars_sent(&self) -> usize {
+        if self.completed || self.element_to_char.is_empty() {
+            return self.message.len();
+        }
+        if self.current_element_idx >= self.element_to_char.len() {
+            return self.message.len();
+        }
+        // Return the character index that the current element belongs to
+        self.element_to_char
+            .get(self.current_element_idx)
+            .copied()
+            .unwrap_or(self.message.len())
     }
 
     pub fn next_sample(&mut self) -> Option<f32> {
@@ -273,6 +322,8 @@ pub struct Mixer {
     pub stereo_enabled: bool,
     /// 2BSIQ: Which radio is focused (0 = Radio 1/left, 1 = Radio 2/right)
     pub focused_radio: u8,
+    /// 2BSIQ: Whether 2BSIQ mode is enabled (disables sidetone when true)
+    pub two_bsiq_enabled: bool,
 }
 
 impl Mixer {
@@ -285,6 +336,7 @@ impl Mixer {
             settings,
             stereo_enabled: true,
             focused_radio: 0,
+            two_bsiq_enabled: false,
         }
     }
 
@@ -292,6 +344,11 @@ impl Mixer {
     pub fn update_stereo_mode(&mut self, stereo_enabled: bool, focused_radio: u8) {
         self.stereo_enabled = stereo_enabled;
         self.focused_radio = focused_radio;
+    }
+
+    /// Update 2BSIQ mode (controls sidetone muting)
+    pub fn update_2bsiq_mode(&mut self, enabled: bool) {
+        self.two_bsiq_enabled = enabled;
     }
 
     /// Add a new calling station
@@ -401,6 +458,14 @@ impl Mixer {
         (completed_stations, user_completed)
     }
 
+    /// Get current TX progress for visual indicator
+    /// Returns (message, chars_sent) if user is transmitting, None otherwise
+    pub fn get_tx_progress(&self) -> Option<(&str, usize)> {
+        self.user_station
+            .as_ref()
+            .map(|u| (u.message.as_str(), u.chars_sent()))
+    }
+
     /// Fill a buffer with mixed stereo audio (interleaved L/R pairs)
     /// When stereo_enabled: stations routed based on radio_index (0 = left, 1 = right)
     /// When !stereo_enabled: focused radio goes to both ears
@@ -484,11 +549,15 @@ impl Mixer {
         self.stations.retain(|s| !s.is_completed());
 
         // Mix user station to both channels (sidetone)
+        // In 2BSIQ mode, sidetone is disabled - user sees TX indicator instead
         if let Some(ref mut user) = self.user_station {
             for frame_idx in 0..num_frames {
                 if let Some(user_sample) = user.next_sample() {
-                    buffer[frame_idx * 2] += user_sample; // Left
-                    buffer[frame_idx * 2 + 1] += user_sample; // Right
+                    // Only add audio if not in 2BSIQ mode
+                    if !self.two_bsiq_enabled {
+                        buffer[frame_idx * 2] += user_sample; // Left
+                        buffer[frame_idx * 2 + 1] += user_sample; // Right
+                    }
                 } else {
                     break;
                 }
