@@ -115,116 +115,273 @@ fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
 
     // Determine which radio is transmitting (if any)
     let tx_radio_index = tx_progress.as_ref().map(|(_, _, radio)| *radio);
+    let r1_transmitting = tx_radio_index == Some(0);
+    let r2_transmitting = tx_radio_index == Some(1);
+
+    let r1_focused = app.focused_radio == RadioId::Radio1;
+    let r2_focused = app.focused_radio == RadioId::Radio2;
+    let show_status = app.settings.user.show_status_line;
+    let settings_open = app.show_settings;
+    let contest_type = app.settings.contest.contest_type;
+
+    let r1_tx = if r1_transmitting {
+        tx_progress
+            .as_ref()
+            .map(|(msg, chars, _)| (msg.clone(), *chars))
+    } else {
+        None
+    };
+    let r2_tx = if r2_transmitting {
+        tx_progress
+            .as_ref()
+            .map(|(msg, chars, _)| (msg.clone(), *chars))
+    } else {
+        None
+    };
 
     ui.horizontal(|ui| {
+        let panel_width = 280.0;
+
         // Radio 1 panel (left) - radio_index 0
-        let r1_focused = app.focused_radio == RadioId::Radio1;
-        let r1_tx = if tx_radio_index == Some(0) {
-            tx_progress
-                .as_ref()
-                .map(|(msg, chars, _)| (msg.clone(), *chars))
+        let frame1 = if r1_focused {
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .inner_margin(8.0)
+                .corner_radius(4.0)
         } else {
-            None
+            egui::Frame::new().inner_margin(8.0)
         };
-        render_radio_panel(
-            ui,
-            RadioId::Radio1,
-            &app.radio1,
-            r1_focused,
-            app.settings.user.show_status_line,
-            app.show_settings,
-            &app.settings.contest.contest_type,
-            r1_tx.as_ref(),
-        );
+
+        frame1.show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_min_width(panel_width);
+                render_radio_header(ui, RadioId::Radio1, r1_focused, r1_transmitting);
+                ui.add_space(4.0);
+
+                if show_status {
+                    render_status(ui, &app.radio1.state);
+                    ui.add_space(8.0);
+                }
+
+                // Input fields - editable if focused, read-only otherwise
+                if r1_focused {
+                    render_editable_input_fields(
+                        ui,
+                        &mut app.callsign_input,
+                        &mut app.exchange_input,
+                        &app.current_field,
+                        settings_open,
+                        &contest_type,
+                    );
+                } else {
+                    render_readonly_input_fields(ui, &app.radio1, &contest_type);
+                }
+
+                // TX indicator - always show area, display content when transmitting
+                if let Some((message, chars_sent)) = &r1_tx {
+                    render_tx_indicator(ui, message, *chars_sent);
+                } else {
+                    render_tx_indicator_placeholder(ui);
+                }
+
+                // Volume slider
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Vol:").small());
+                    let slider = egui::Slider::new(&mut app.settings.user.radio1_volume, 0.0..=1.0)
+                        .show_value(false);
+                    if ui.add_sized(Vec2::new(100.0, 16.0), slider).changed() {
+                        app.send_radio_volumes();
+                    }
+                });
+            });
+        });
 
         ui.add_space(16.0);
         ui.separator();
         ui.add_space(16.0);
 
         // Radio 2 panel (right) - radio_index 1
-        let r2_focused = app.focused_radio == RadioId::Radio2;
-        let r2_tx = if tx_radio_index == Some(1) {
-            tx_progress
-                .as_ref()
-                .map(|(msg, chars, _)| (msg.clone(), *chars))
+        let frame2 = if r2_focused {
+            egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .inner_margin(8.0)
+                .corner_radius(4.0)
         } else {
-            None
+            egui::Frame::new().inner_margin(8.0)
         };
-        render_radio_panel(
-            ui,
-            RadioId::Radio2,
-            &app.radio2,
-            r2_focused,
-            app.settings.user.show_status_line,
-            app.show_settings,
-            &app.settings.contest.contest_type,
-            r2_tx.as_ref(),
-        );
+
+        frame2.show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_min_width(panel_width);
+                render_radio_header(ui, RadioId::Radio2, r2_focused, r2_transmitting);
+                ui.add_space(4.0);
+
+                if show_status {
+                    render_status(ui, &app.radio2.state);
+                    ui.add_space(8.0);
+                }
+
+                // Input fields - editable if focused, read-only otherwise
+                if r2_focused {
+                    render_editable_input_fields(
+                        ui,
+                        &mut app.callsign_input,
+                        &mut app.exchange_input,
+                        &app.current_field,
+                        settings_open,
+                        &contest_type,
+                    );
+                } else {
+                    render_readonly_input_fields(ui, &app.radio2, &contest_type);
+                }
+
+                // TX indicator - always show area, display content when transmitting
+                if let Some((message, chars_sent)) = &r2_tx {
+                    render_tx_indicator(ui, message, *chars_sent);
+                } else {
+                    render_tx_indicator_placeholder(ui);
+                }
+
+                // Volume slider
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Vol:").small());
+                    let slider = egui::Slider::new(&mut app.settings.user.radio2_volume, 0.0..=1.0)
+                        .show_value(false);
+                    if ui.add_sized(Vec2::new(100.0, 16.0), slider).changed() {
+                        app.send_radio_volumes();
+                    }
+                });
+            });
+        });
     });
 
     ui.add_space(12.0);
     ui.separator();
 }
 
-/// Render a single radio panel for 2BSIQ mode
-fn render_radio_panel(
+/// Render the radio header with focus indicator and TX status
+fn render_radio_header(
     ui: &mut egui::Ui,
     radio_id: RadioId,
-    radio_state: &RadioState,
     is_focused: bool,
-    show_status: bool,
+    is_transmitting: bool,
+) {
+    ui.horizontal(|ui| {
+        let (label, channel) = match radio_id {
+            RadioId::Radio1 => ("RADIO 1", "(Left)"),
+            RadioId::Radio2 => ("RADIO 2", "(Right)"),
+        };
+
+        // TX/RX status indicator circle
+        if is_transmitting {
+            ui.label(RichText::new("●").color(Color32::RED));
+        } else {
+            ui.label(RichText::new("●").color(Color32::GREEN));
+        }
+
+        // Focus indicator
+        if is_focused {
+            ui.label(RichText::new("▶").color(Color32::LIGHT_BLUE));
+        } else {
+            ui.label(RichText::new(" ").monospace());
+        }
+
+        ui.label(RichText::new(label).strong());
+        ui.label(RichText::new(channel).weak().small());
+    });
+}
+
+/// Render editable input fields for the focused radio
+fn render_editable_input_fields(
+    ui: &mut egui::Ui,
+    callsign_input: &mut String,
+    exchange_input: &mut String,
+    current_field: &InputField,
     settings_open: bool,
     contest_type: &crate::contest::ContestType,
-    tx_progress: Option<&(String, usize)>,
 ) {
-    let panel_width = 280.0;
+    // Call and Exchange on same line
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Call:").strong());
+        let call_response = ui.add_sized(
+            Vec2::new(110.0, 24.0),
+            egui::TextEdit::singleline(callsign_input)
+                .font(egui::TextStyle::Monospace)
+                .hint_text("Call"),
+        );
 
-    // Create a frame with highlighting for focused radio
-    let frame = if is_focused {
-        egui::Frame::new()
-            .fill(ui.visuals().faint_bg_color)
-            .inner_margin(8.0)
-            .corner_radius(4.0)
-    } else {
-        egui::Frame::new().inner_margin(8.0)
-    };
-
-    frame.show(ui, |ui| {
-        ui.set_min_width(panel_width);
-
-        // Radio header with focus indicator
-        ui.horizontal(|ui| {
-            let (label, channel) = match radio_id {
-                RadioId::Radio1 => ("RADIO 1", "(Left)"),
-                RadioId::Radio2 => ("RADIO 2", "(Right)"),
-            };
-
-            if is_focused {
-                ui.label(RichText::new("▶").color(Color32::GREEN));
-            } else {
-                ui.label(RichText::new(" ").monospace());
-            }
-
-            ui.label(RichText::new(label).strong());
-            ui.label(RichText::new(channel).weak().small());
-        });
-
-        ui.add_space(4.0);
-
-        // Status indicator
-        if show_status {
-            render_status(ui, &radio_state.state);
-            ui.add_space(8.0);
+        if call_response.changed() {
+            *callsign_input = callsign_input.to_uppercase();
         }
 
-        // Input fields (read-only display in 2BSIQ mode for now)
-        render_radio_input_fields(ui, radio_state, is_focused, settings_open, contest_type);
+        if *current_field == InputField::Callsign && !settings_open {
+            call_response.request_focus();
+        }
 
-        // TX indicator (shows transmission progress)
-        if let Some((message, chars_sent)) = tx_progress {
-            render_tx_indicator(ui, message, *chars_sent);
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("Exch:").strong());
+        let exch_response = ui.add_sized(
+            Vec2::new(110.0, 24.0),
+            egui::TextEdit::singleline(exchange_input)
+                .font(egui::TextStyle::Monospace)
+                .hint_text("Exch"),
+        );
+
+        if exch_response.changed() {
+            *exchange_input = exchange_input.to_uppercase();
+        }
+
+        if *current_field == InputField::Exchange && !settings_open {
+            exch_response.request_focus();
         }
     });
+
+    // Show exchange format hint
+    let hint = match contest_type {
+        crate::contest::ContestType::CqWw => "RST ZONE",
+        crate::contest::ContestType::Sweepstakes => "NR PREC CK SEC",
+        crate::contest::ContestType::Cwt => "NAME NUM",
+    };
+    ui.label(RichText::new(hint).small().weak());
+}
+
+/// Render read-only input fields for the non-focused radio
+fn render_readonly_input_fields(
+    ui: &mut egui::Ui,
+    radio_state: &RadioState,
+    contest_type: &crate::contest::ContestType,
+) {
+    // Call and Exchange on same line
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Call:").strong());
+        let call_display = if radio_state.callsign_input.is_empty() {
+            "________".to_string()
+        } else {
+            format!("{:8}", radio_state.callsign_input)
+        };
+        ui.label(RichText::new(call_display).monospace());
+
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("Exch:").strong());
+        let exch_display = if radio_state.exchange_input.is_empty() {
+            "________".to_string()
+        } else {
+            format!("{:8}", radio_state.exchange_input)
+        };
+        ui.label(RichText::new(exch_display).monospace());
+    });
+
+    // Show exchange format hint
+    let hint = match contest_type {
+        crate::contest::ContestType::CqWw => "RST ZONE",
+        crate::contest::ContestType::Sweepstakes => "NR PREC CK SEC",
+        crate::contest::ContestType::Cwt => "NAME NUM",
+    };
+    ui.label(RichText::new(hint).small().weak());
 }
 
 /// Render the TX indicator showing transmission progress
@@ -254,46 +411,13 @@ fn render_tx_indicator(ui: &mut egui::Ui, message: &str, chars_sent: usize) {
     });
 }
 
-/// Render input fields for a radio in 2BSIQ mode
-fn render_radio_input_fields(
-    ui: &mut egui::Ui,
-    radio_state: &RadioState,
-    _is_focused: bool,
-    _settings_open: bool,
-    contest_type: &crate::contest::ContestType,
-) {
-    // For now, display the current values (editing will come in later phases)
+/// Render placeholder for TX indicator when not transmitting
+fn render_tx_indicator_placeholder(ui: &mut egui::Ui) {
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Call:").strong());
-        let call_display = if radio_state.callsign_input.is_empty() {
-            "________".to_string()
-        } else {
-            format!("{:8}", radio_state.callsign_input)
-        };
-        ui.label(RichText::new(call_display).monospace());
-    });
-
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Exch:").strong());
-        let exch_display = if radio_state.exchange_input.is_empty() {
-            "________".to_string()
-        } else {
-            format!("{:8}", radio_state.exchange_input)
-        };
-        ui.label(RichText::new(exch_display).monospace());
-    });
-
-    // Show exchange format hint
-    ui.horizontal(|ui| {
-        let hint = match contest_type {
-            crate::contest::ContestType::CqWw => "RST ZONE",
-            crate::contest::ContestType::Sweepstakes => "NR PREC CK SEC",
-            crate::contest::ContestType::Cwt => "NAME NUM",
-        };
-        ui.label(RichText::new(hint).small().weak());
+        ui.label(RichText::new("TX:").strong().color(Color32::DARK_GRAY));
     });
 }
-
 /// Render 2BSIQ-specific key hints
 fn render_2bsiq_key_hints(ui: &mut egui::Ui, stereo_enabled: bool, focused_radio: RadioId) {
     ui.horizontal(|ui| {

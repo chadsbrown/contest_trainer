@@ -328,6 +328,10 @@ pub struct Mixer {
     pub latch_mode: bool,
     /// Which radio is currently transmitting (for TX indicator and latch mode)
     pub transmitting_radio: u8,
+    /// Per-radio volume: Radio 1 (0.0 to 1.0)
+    pub radio1_volume: f32,
+    /// Per-radio volume: Radio 2 (0.0 to 1.0)
+    pub radio2_volume: f32,
 }
 
 impl Mixer {
@@ -343,7 +347,15 @@ impl Mixer {
             two_bsiq_enabled: false,
             latch_mode: false,
             transmitting_radio: 0,
+            radio1_volume: 1.0,
+            radio2_volume: 1.0,
         }
+    }
+
+    /// Update per-radio volume levels
+    pub fn update_radio_volumes(&mut self, radio1_volume: f32, radio2_volume: f32) {
+        self.radio1_volume = radio1_volume.clamp(0.0, 1.0);
+        self.radio2_volume = radio2_volume.clamp(0.0, 1.0);
     }
 
     /// Update 2BSIQ stereo routing mode
@@ -405,10 +417,20 @@ impl Mixer {
         self.user_station = None;
     }
 
+    /// Clear stations for a specific radio only (for 2BSIQ mode)
+    pub fn clear_radio(&mut self, radio_index: u8) {
+        self.stations.retain(|s| s.radio_index != radio_index);
+        // Clear user station only if it's transmitting on this radio
+        if self.transmitting_radio == radio_index {
+            self.user_station = None;
+        }
+    }
+
     /// Fill a buffer with mixed audio (mono), returns list of completed stations (id, radio_index)
-    pub fn fill_buffer(&mut self, buffer: &mut [f32]) -> (Vec<(StationId, u8)>, bool) {
+    /// and user message completion (radio_index if completed)
+    pub fn fill_buffer(&mut self, buffer: &mut [f32]) -> (Vec<(StationId, u8)>, Option<u8>) {
         let mut completed_stations = Vec::new();
-        let mut user_completed = false;
+        let mut user_completed_radio: Option<u8> = None;
 
         // Clear buffer
         for sample in buffer.iter_mut() {
@@ -449,7 +471,7 @@ impl Mixer {
                 }
             }
             if user.is_completed() {
-                user_completed = true;
+                user_completed_radio = Some(self.transmitting_radio);
                 self.user_station = None;
             }
         }
@@ -467,7 +489,7 @@ impl Mixer {
             }
         }
 
-        (completed_stations, user_completed)
+        (completed_stations, user_completed_radio)
     }
 
     /// Get current TX progress for visual indicator
@@ -481,10 +503,10 @@ impl Mixer {
     /// Fill a buffer with mixed stereo audio (interleaved L/R pairs)
     /// When stereo_enabled: stations routed based on radio_index (0 = left, 1 = right)
     /// When !stereo_enabled: focused radio goes to both ears
-    /// Returns list of completed stations (id, radio_index) and whether user message completed
-    pub fn fill_stereo_buffer(&mut self, buffer: &mut [f32]) -> (Vec<(StationId, u8)>, bool) {
+    /// Returns list of completed stations (id, radio_index) and user message completion (radio_index if completed)
+    pub fn fill_stereo_buffer(&mut self, buffer: &mut [f32]) -> (Vec<(StationId, u8)>, Option<u8>) {
         let mut completed_stations = Vec::new();
-        let mut user_completed = false;
+        let mut user_completed_radio: Option<u8> = None;
 
         // Buffer is interleaved stereo: [L0, R0, L1, R1, ...]
         let num_frames = buffer.len() / 2;
@@ -496,7 +518,7 @@ impl Mixer {
 
         // Determine audio routing mode:
         // - Latch active: user is transmitting in 2BSIQ with latch mode enabled
-        //   -> route OTHER radio (not focused) to both ears
+        //   -> route OTHER radio (not the one transmitting) to both ears
         // - Stereo mode: normal L/R separation
         // - Mono mode: focused radio to both ears
         let is_transmitting = self.user_station.is_some();
@@ -513,21 +535,9 @@ impl Mixer {
         // Add noise based on routing mode
         let mute_noise = self.settings.mute_noise_during_tx && is_transmitting;
         if !mute_noise {
-            if latch_active {
-                // Latch mode: other radio's noise to both ears
-                for frame_idx in 0..num_frames {
-                    let noise_sample = if latch_radio == 0 {
-                        self.noise
-                            .next_sample(self.settings.noise_level, &self.settings.noise)
-                    } else {
-                        self.noise_right
-                            .next_sample(self.settings.noise_level, &self.settings.noise)
-                    };
-                    buffer[frame_idx * 2] += noise_sample; // Left
-                    buffer[frame_idx * 2 + 1] += noise_sample; // Right
-                }
-            } else if self.stereo_enabled {
-                // Stereo mode: independent noise per channel
+            if self.two_bsiq_enabled {
+                // 2BSIQ mode: always independent noise per channel
+                // Latch/stereo modes affect station routing but noise is always per-radio
                 for frame_idx in 0..num_frames {
                     let noise_left = self
                         .noise
@@ -539,15 +549,11 @@ impl Mixer {
                     buffer[frame_idx * 2 + 1] += noise_right; // Right (Radio 2)
                 }
             } else {
-                // Mono mode: focused radio's noise to both ears
+                // Single radio mode: same noise to both ears
                 for frame_idx in 0..num_frames {
-                    let noise_sample = if self.focused_radio == 0 {
-                        self.noise
-                            .next_sample(self.settings.noise_level, &self.settings.noise)
-                    } else {
-                        self.noise_right
-                            .next_sample(self.settings.noise_level, &self.settings.noise)
-                    };
+                    let noise_sample = self
+                        .noise
+                        .next_sample(self.settings.noise_level, &self.settings.noise);
                     buffer[frame_idx * 2] += noise_sample; // Left
                     buffer[frame_idx * 2 + 1] += noise_sample; // Right
                 }
@@ -556,40 +562,47 @@ impl Mixer {
 
         // Mix each calling station based on routing mode
         for station in &mut self.stations {
-            if latch_active {
-                // Latch mode: only hear other radio (not focused), route to both ears
-                let dominated = station.radio_index == latch_radio;
+            if self.two_bsiq_enabled {
+                // 2BSIQ mode: stations ALWAYS play on their respective channels
+                // Latch and stereo modes only affect routing, not whether audio plays
                 for frame_idx in 0..num_frames {
                     if let Some(station_sample) = station.next_sample() {
-                        if dominated {
-                            buffer[frame_idx * 2] += station_sample; // Left
-                            buffer[frame_idx * 2 + 1] += station_sample; // Right
+                        if latch_active {
+                            // Latch mode: other radio (not TXing) goes to both ears
+                            if station.radio_index == latch_radio {
+                                buffer[frame_idx * 2] += station_sample; // Left
+                                buffer[frame_idx * 2 + 1] += station_sample; // Right
+                            }
+                            // TXing radio's stations still play but only in their channel
+                            else {
+                                let channel_offset = station.radio_index as usize;
+                                buffer[frame_idx * 2 + channel_offset] += station_sample;
+                            }
+                        } else if self.stereo_enabled {
+                            // Stereo mode: route to appropriate channel based on radio_index
+                            let channel_offset = station.radio_index as usize; // 0 = left, 1 = right
+                            buffer[frame_idx * 2 + channel_offset] += station_sample;
+                        } else {
+                            // Mono mode: focused radio to both ears, other radio to its channel only
+                            if station.radio_index == self.focused_radio {
+                                buffer[frame_idx * 2] += station_sample; // Left
+                                buffer[frame_idx * 2 + 1] += station_sample; // Right
+                            } else {
+                                // Non-focused radio still plays in its own channel
+                                let channel_offset = station.radio_index as usize;
+                                buffer[frame_idx * 2 + channel_offset] += station_sample;
+                            }
                         }
-                        // Focused radio stations are silenced during latch
-                    } else {
-                        break;
-                    }
-                }
-            } else if self.stereo_enabled {
-                // Stereo mode: route to appropriate channel based on radio_index
-                let channel_offset = station.radio_index as usize; // 0 = left, 1 = right
-                for frame_idx in 0..num_frames {
-                    if let Some(station_sample) = station.next_sample() {
-                        buffer[frame_idx * 2 + channel_offset] += station_sample;
                     } else {
                         break;
                     }
                 }
             } else {
-                // Mono mode: only hear focused radio, route to both ears
-                let dominated = station.radio_index == self.focused_radio;
+                // Single radio mode: all stations to both ears
                 for frame_idx in 0..num_frames {
                     if let Some(station_sample) = station.next_sample() {
-                        if dominated {
-                            buffer[frame_idx * 2] += station_sample; // Left
-                            buffer[frame_idx * 2 + 1] += station_sample; // Right
-                        }
-                        // Non-focused radio stations are silenced in mono mode
+                        buffer[frame_idx * 2] += station_sample; // Left
+                        buffer[frame_idx * 2 + 1] += station_sample; // Right
                     } else {
                         break;
                     }
@@ -618,24 +631,42 @@ impl Mixer {
                 }
             }
             if user.is_completed() {
-                user_completed = true;
+                user_completed_radio = Some(self.transmitting_radio);
                 self.user_station = None;
             }
         }
 
-        // Apply master volume, dither, and soft clipping to all samples
+        // Apply per-radio volume, master volume, dither, and soft clipping
         let mut rng = rand::thread_rng();
-        for sample in buffer.iter_mut() {
-            *sample *= self.settings.master_volume;
+        for frame_idx in 0..num_frames {
+            let left_idx = frame_idx * 2;
+            let right_idx = frame_idx * 2 + 1;
+
+            // Apply per-radio volume (left = Radio 1, right = Radio 2)
+            buffer[left_idx] *= self.radio1_volume;
+            buffer[right_idx] *= self.radio2_volume;
+
+            // Apply master volume
+            buffer[left_idx] *= self.settings.master_volume;
+            buffer[right_idx] *= self.settings.master_volume;
+
             // Add very small triangular dither to prevent audio artifacts
-            let dither = (rng.gen::<f32>() - 0.5) * 0.001;
-            *sample += dither;
+            let dither_l = (rng.gen::<f32>() - 0.5) * 0.001;
+            let dither_r = (rng.gen::<f32>() - 0.5) * 0.001;
+            buffer[left_idx] += dither_l;
+            buffer[right_idx] += dither_r;
+
             // Soft clipping using tanh
-            if sample.abs() > 0.8 {
-                *sample = sample.signum() * (0.8 + 0.2 * ((*sample).abs() - 0.8).tanh());
+            if buffer[left_idx].abs() > 0.8 {
+                buffer[left_idx] =
+                    buffer[left_idx].signum() * (0.8 + 0.2 * (buffer[left_idx].abs() - 0.8).tanh());
+            }
+            if buffer[right_idx].abs() > 0.8 {
+                buffer[right_idx] = buffer[right_idx].signum()
+                    * (0.8 + 0.2 * (buffer[right_idx].abs() - 0.8).tanh());
             }
         }
 
-        (completed_stations, user_completed)
+        (completed_stations, user_completed_radio)
     }
 }

@@ -419,6 +419,25 @@ impl ContestApp {
         });
     }
 
+    /// Send radio volume update to audio engine
+    pub fn send_radio_volumes(&self) {
+        let _ = self.cmd_tx.send(AudioCommand::UpdateRadioVolumes {
+            radio1_volume: self.settings.user.radio1_volume,
+            radio2_volume: self.settings.user.radio2_volume,
+        });
+    }
+
+    /// Stop audio for the focused radio only (in 2BSIQ mode) or all audio (single radio mode)
+    fn stop_focused_radio_audio(&self) {
+        if self.settings.user.two_bsiq_enabled {
+            let _ = self.cmd_tx.send(AudioCommand::StopRadio {
+                radio_index: self.focused_radio.audio_index(),
+            });
+        } else {
+            let _ = self.cmd_tx.send(AudioCommand::StopAll);
+        }
+    }
+
     /// Sync main app fields to focused RadioState (for 2BSIQ mode)
     /// Call this at the start of update to copy main fields to focused radio
     fn sync_to_radio_state(&mut self) {
@@ -456,6 +475,46 @@ impl ContestApp {
         }
     }
 
+    /// Get the caller manager for the currently focused radio
+    fn focused_caller_manager(&mut self) -> &mut CallerManager {
+        if self.settings.user.two_bsiq_enabled && self.focused_radio == RadioId::Radio2 {
+            &mut self.caller_manager2
+        } else {
+            &mut self.caller_manager
+        }
+    }
+
+    /// Get the state for a specific radio (cloned to avoid borrow issues)
+    fn get_radio_state(&self, radio_index: u8) -> ContestState {
+        if self.settings.user.two_bsiq_enabled {
+            if radio_index == 0 {
+                self.radio1.state.clone()
+            } else {
+                self.radio2.state.clone()
+            }
+        } else {
+            self.state.clone()
+        }
+    }
+
+    /// Set the state for a specific radio
+    fn set_radio_state(&mut self, radio_index: u8, new_state: ContestState) {
+        if self.settings.user.two_bsiq_enabled {
+            if radio_index == 0 {
+                self.radio1.state = new_state.clone();
+            } else {
+                self.radio2.state = new_state.clone();
+            }
+            // Also update main state if this is the focused radio
+            let focused_index = self.focused_radio.audio_index();
+            if radio_index == focused_index {
+                self.state = new_state;
+            }
+        } else {
+            self.state = new_state;
+        }
+    }
+
     /// Get current TX progress for visual indicator (2BSIQ mode)
     /// Returns (message, chars_sent, radio_index) if user is transmitting, None otherwise
     pub fn get_tx_progress(&self) -> Option<(String, usize, u8)> {
@@ -479,13 +538,33 @@ impl ContestApp {
             radio_index,
         });
 
-        // Only update state if sending on focused radio
-        if radio_index == self.focused_radio.audio_index() {
-            self.state = ContestState::CallingCq;
+        // Update state for the radio that's calling CQ
+        self.set_radio_state(radio_index, ContestState::CallingCq);
 
-            // Reset AGN tracking for new QSO
+        // Reset AGN tracking for new QSO on that radio
+        if self.settings.user.two_bsiq_enabled {
+            if radio_index == 0 {
+                self.radio1.used_agn_callsign = false;
+                self.radio1.used_agn_exchange = false;
+            } else {
+                self.radio2.used_agn_callsign = false;
+                self.radio2.used_agn_exchange = false;
+            }
+            // Also update main state if this is the focused radio
+            if radio_index == self.focused_radio.audio_index() {
+                self.used_agn_callsign = false;
+                self.used_agn_exchange = false;
+            }
+        } else {
             self.used_agn_callsign = false;
             self.used_agn_exchange = false;
+        }
+
+        // Notify caller manager that CQ is starting (callers get another chance)
+        if radio_index == 1 {
+            self.caller_manager2.on_cq_restart();
+        } else {
+            self.caller_manager.on_cq_restart();
         }
     }
 
@@ -779,8 +858,8 @@ impl ContestApp {
         self.score.add_qso(validation.points);
         self.user_serial += 1;
 
-        // Mark caller as worked in the caller manager
-        self.caller_manager.on_qso_complete(station_id);
+        // Mark caller as worked in the caller manager for the focused radio
+        self.focused_caller_manager().on_qso_complete(station_id);
 
         // Send TU
         self.send_tu();
@@ -801,8 +880,8 @@ impl ContestApp {
             _ => return,
         };
 
-        // Stop any current station audio
-        let _ = self.cmd_tx.send(AudioCommand::StopAll);
+        // Stop any current station audio on focused radio only
+        self.stop_focused_radio_audio();
 
         // Send the AGN message
         let agn_message = self.settings.user.agn_message.clone();
@@ -827,8 +906,8 @@ impl ContestApp {
             _ => return,
         };
 
-        // Stop any current station audio
-        let _ = self.cmd_tx.send(AudioCommand::StopAll);
+        // Stop any current station audio on focused radio only
+        self.stop_focused_radio_audio();
 
         // Send the AGN message
         let agn_message = self.settings.user.agn_message.clone();
@@ -924,132 +1003,293 @@ impl ContestApp {
                         }
                     }
                 }
-                AudioEvent::UserMessageComplete => {
-                    match &self.state {
-                        ContestState::CallingCq => {
-                            // CQ finished, wait for callers
-                            self.state = ContestState::WaitingForCallers;
-                            self.last_cq_finished = Some(Instant::now());
-                        }
-                        ContestState::SendingExchange { caller } => {
-                            // Our exchange sent, wait briefly before station responds
-                            let caller = caller.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingToSendExchange { caller, wait_until };
-                        }
-                        ContestState::QsoComplete => {
-                            // TU finished - maybe a tail-ender jumps in
-                            self.try_spawn_tail_ender();
-                        }
-                        ContestState::QueryingPartial { callers } => {
-                            // Partial query sent, wait briefly before station repeats
-                            let callers = callers.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForPartialResponse {
-                                callers,
-                                wait_until,
-                            };
-                        }
-                        ContestState::SendingAgn { caller } => {
-                            // AGN request sent, wait briefly before station resends exchange
-                            let caller = caller.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForAgn { caller, wait_until };
-                        }
-                        ContestState::SendingCallsignAgn { callers } => {
-                            // AGN request sent, wait briefly before station(s) resend callsign
-                            let callers = callers.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForCallsignAgn {
-                                callers,
-                                wait_until,
-                            };
-                        }
-                        ContestState::SendingExchangeWillCorrect {
-                            caller,
-                            correction_attempts,
-                        } => {
-                            // User's exchange finished, now wait briefly before caller corrects
-                            let caller = caller.clone();
-                            let correction_attempts = *correction_attempts;
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingToSendCallCorrection {
-                                caller,
-                                correction_attempts,
-                                wait_until,
-                            };
-                        }
-                        ContestState::SendingCallsignAgnFromCorrection {
-                            caller,
-                            correction_attempts,
-                        } => {
-                            // AGN request sent during correction flow, wait briefly before station repeats
-                            let caller = caller.clone();
-                            let correction_attempts = *correction_attempts;
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForCallsignAgnFromCorrection {
-                                caller,
-                                correction_attempts,
-                                wait_until,
-                            };
-                        }
-                        ContestState::QueryingPartialFromCorrection {
-                            caller,
-                            correction_attempts,
-                        } => {
-                            // Partial query sent during correction flow, wait briefly before station responds
-                            let caller = caller.clone();
-                            let correction_attempts = *correction_attempts;
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForPartialResponseFromCorrection {
-                                caller,
-                                correction_attempts,
-                                wait_until,
-                            };
-                        }
-                        _ => {}
+                AudioEvent::UserMessageComplete { radio_index } => {
+                    // In 2BSIQ mode, update the correct radio's state
+                    // Otherwise, just update main state
+                    if self.settings.user.two_bsiq_enabled {
+                        self.handle_user_message_complete_2bsiq(radio_index);
+                    } else {
+                        self.handle_user_message_complete();
                     }
                 }
             }
         }
     }
 
-    /// Try to spawn a tail-ender after TU - a station that calls immediately
-    /// without waiting for another CQ
-    fn try_spawn_tail_ender(&mut self) {
-        // Try to get a tail-ender from the caller manager
-        let tail_ender = self.caller_manager.try_spawn_tail_ender(
-            self.contest.as_ref(),
-            Some(&self.settings.user.callsign),
-            Some(&self.cty),
-        );
+    /// Handle user message complete in single-radio mode
+    fn handle_user_message_complete(&mut self) {
+        match &self.state {
+            ContestState::CallingCq => {
+                self.state = ContestState::WaitingForCallers;
+                self.last_cq_finished = Some(Instant::now());
+            }
+            ContestState::SendingExchange { caller } => {
+                let caller = caller.clone();
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                self.state = ContestState::WaitingToSendExchange { caller, wait_until };
+            }
+            ContestState::QsoComplete => {
+                self.try_spawn_tail_ender();
+            }
+            ContestState::QueryingPartial { callers } => {
+                let callers = callers.clone();
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                self.state = ContestState::WaitingForPartialResponse {
+                    callers,
+                    wait_until,
+                };
+            }
+            ContestState::SendingAgn { caller } => {
+                let caller = caller.clone();
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                self.state = ContestState::WaitingForAgn { caller, wait_until };
+            }
+            ContestState::SendingCallsignAgn { callers } => {
+                let callers = callers.clone();
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                self.state = ContestState::WaitingForCallsignAgn {
+                    callers,
+                    wait_until,
+                };
+            }
+            ContestState::SendingExchangeWillCorrect {
+                caller,
+                correction_attempts,
+            } => {
+                let caller = caller.clone();
+                let correction_attempts = *correction_attempts;
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                self.state = ContestState::WaitingToSendCallCorrection {
+                    caller,
+                    correction_attempts,
+                    wait_until,
+                };
+            }
+            ContestState::SendingCallsignAgnFromCorrection {
+                caller,
+                correction_attempts,
+            } => {
+                let caller = caller.clone();
+                let correction_attempts = *correction_attempts;
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                self.state = ContestState::WaitingForCallsignAgnFromCorrection {
+                    caller,
+                    correction_attempts,
+                    wait_until,
+                };
+            }
+            ContestState::QueryingPartialFromCorrection {
+                caller,
+                correction_attempts,
+            } => {
+                let caller = caller.clone();
+                let correction_attempts = *correction_attempts;
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                self.state = ContestState::WaitingForPartialResponseFromCorrection {
+                    caller,
+                    correction_attempts,
+                    wait_until,
+                };
+            }
+            _ => {}
+        }
+    }
 
-        let Some(params) = tail_ender else {
+    /// Handle user message complete in 2BSIQ mode - updates the correct radio's state
+    fn handle_user_message_complete_2bsiq(&mut self, radio_index: u8) {
+        // Check if this is the focused radio
+        let is_focused = (radio_index == 0 && self.focused_radio == RadioId::Radio1)
+            || (radio_index == 1 && self.focused_radio == RadioId::Radio2);
+
+        // Clone the current radio state to work with
+        let current_state = if radio_index == 0 {
+            self.radio1.state.clone()
+        } else {
+            self.radio2.state.clone()
+        };
+
+        // Compute the new state
+        let new_state = match &current_state {
+            ContestState::CallingCq => {
+                // Update last_cq_finished for this radio
+                if radio_index == 0 {
+                    self.radio1.last_cq_finished = Some(Instant::now());
+                } else {
+                    self.radio2.last_cq_finished = Some(Instant::now());
+                }
+                if is_focused {
+                    self.last_cq_finished = Some(Instant::now());
+                }
+                Some(ContestState::WaitingForCallers)
+            }
+            ContestState::SendingExchange { caller } => {
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                Some(ContestState::WaitingToSendExchange {
+                    caller: caller.clone(),
+                    wait_until,
+                })
+            }
+            ContestState::QsoComplete => {
+                // Handle tail-ender for this radio
+                self.try_spawn_tail_ender_for_radio(radio_index);
+                // Return the state that try_spawn_tail_ender_for_radio set
+                Some(self.get_radio_state(radio_index))
+            }
+            ContestState::QueryingPartial { callers } => {
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                Some(ContestState::WaitingForPartialResponse {
+                    callers: callers.clone(),
+                    wait_until,
+                })
+            }
+            ContestState::SendingAgn { caller } => {
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                Some(ContestState::WaitingForAgn {
+                    caller: caller.clone(),
+                    wait_until,
+                })
+            }
+            ContestState::SendingCallsignAgn { callers } => {
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                Some(ContestState::WaitingForCallsignAgn {
+                    callers: callers.clone(),
+                    wait_until,
+                })
+            }
+            ContestState::SendingExchangeWillCorrect {
+                caller,
+                correction_attempts,
+            } => {
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                Some(ContestState::WaitingToSendCallCorrection {
+                    caller: caller.clone(),
+                    correction_attempts: *correction_attempts,
+                    wait_until,
+                })
+            }
+            ContestState::SendingCallsignAgnFromCorrection {
+                caller,
+                correction_attempts,
+            } => {
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                Some(ContestState::WaitingForCallsignAgnFromCorrection {
+                    caller: caller.clone(),
+                    correction_attempts: *correction_attempts,
+                    wait_until,
+                })
+            }
+            ContestState::QueryingPartialFromCorrection {
+                caller,
+                correction_attempts,
+            } => {
+                let wait_until = Instant::now() + std::time::Duration::from_millis(250);
+                Some(ContestState::WaitingForPartialResponseFromCorrection {
+                    caller: caller.clone(),
+                    correction_attempts: *correction_attempts,
+                    wait_until,
+                })
+            }
+            _ => None,
+        };
+
+        // Apply the new state
+        if let Some(new_state) = new_state {
+            if radio_index == 0 {
+                self.radio1.state = new_state.clone();
+            } else {
+                self.radio2.state = new_state.clone();
+            }
+            if is_focused {
+                self.state = new_state;
+            }
+        }
+    }
+
+    /// Try to spawn a tail-ender after TU - a station that calls immediately
+    /// without waiting for another CQ. Uses focused radio in single-radio mode.
+    fn try_spawn_tail_ender(&mut self) {
+        let radio_index = if self.settings.user.two_bsiq_enabled {
+            self.focused_radio.audio_index()
+        } else {
+            0
+        };
+        self.try_spawn_tail_ender_for_radio(radio_index);
+    }
+
+    /// Try to spawn a tail-ender for a specific radio
+    fn try_spawn_tail_ender_for_radio(&mut self, radio_index: u8) {
+        // Get tail-ender from correct caller manager
+        let tail_ender = if radio_index == 1 {
+            self.caller_manager2.try_spawn_tail_ender(
+                self.contest.as_ref(),
+                Some(&self.settings.user.callsign),
+                Some(&self.cty),
+            )
+        } else {
+            self.caller_manager.try_spawn_tail_ender(
+                self.contest.as_ref(),
+                Some(&self.settings.user.callsign),
+                Some(&self.cty),
+            )
+        };
+
+        let Some(mut params) = tail_ender else {
             // No tail-ender, go to idle
-            self.state = ContestState::Idle;
+            self.set_radio_state(radio_index, ContestState::Idle);
             return;
         };
+
+        // Ensure radio_index is set correctly on the params
+        params.radio_index = radio_index;
 
         // Prepare the tail-ender
         let callers = vec![ActiveCaller { params }];
 
         // Reset AGN tracking for new QSO (this is a new QSO without F1/CQ)
-        self.used_agn_callsign = false;
-        self.used_agn_exchange = false;
+        if self.settings.user.two_bsiq_enabled {
+            if radio_index == 0 {
+                self.radio1.used_agn_callsign = false;
+                self.radio1.used_agn_exchange = false;
+            } else {
+                self.radio2.used_agn_callsign = false;
+                self.radio2.used_agn_exchange = false;
+            }
+            // Also update main state if focused
+            if radio_index == self.focused_radio.audio_index() {
+                self.used_agn_callsign = false;
+                self.used_agn_exchange = false;
+            }
+        } else {
+            self.used_agn_callsign = false;
+            self.used_agn_exchange = false;
+        }
 
         // Wait 100ms before the tail-ender starts calling
         let wait_until = Instant::now() + std::time::Duration::from_millis(100);
-        self.state = ContestState::WaitingForTailEnder {
-            callers,
-            wait_until,
-        };
+        self.set_radio_state(
+            radio_index,
+            ContestState::WaitingForTailEnder {
+                callers,
+                wait_until,
+            },
+        );
     }
 
     fn check_waiting_for_tail_ender(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_for_tail_ender_for_radio(0);
+            self.check_waiting_for_tail_ender_for_radio(1);
+        } else {
+            self.check_waiting_for_tail_ender_for_radio(0);
+        }
+    }
+
+    fn check_waiting_for_tail_ender_for_radio(&mut self, radio_index: u8) {
+        let current_state = self.get_radio_state(radio_index);
         if let ContestState::WaitingForTailEnder {
             callers,
             wait_until,
-        } = &self.state
+        } = &current_state
         {
             if Instant::now() >= *wait_until {
                 let callers = callers.clone();
@@ -1061,15 +1301,25 @@ impl ContestApp {
                         .send(AudioCommand::StartStation(caller.params.clone()));
                 }
 
-                self.state = ContestState::StationsCalling { callers };
+                self.set_radio_state(radio_index, ContestState::StationsCalling { callers });
             }
         }
     }
 
     fn check_waiting_to_send_exchange(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_to_send_exchange_for_radio(0);
+            self.check_waiting_to_send_exchange_for_radio(1);
+        } else {
+            self.check_waiting_to_send_exchange_for_radio(0);
+        }
+    }
+
+    fn check_waiting_to_send_exchange_for_radio(&mut self, radio_index: u8) {
         use rand::Rng;
 
-        if let ContestState::WaitingToSendExchange { caller, wait_until } = &self.state {
+        let current_state = self.get_radio_state(radio_index);
+        if let ContestState::WaitingToSendExchange { caller, wait_until } = &current_state {
             if Instant::now() >= *wait_until {
                 let caller = caller.clone();
 
@@ -1086,10 +1336,10 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
-                        radio_index: 0,
+                        radio_index,
                     }));
 
-                    self.state = ContestState::CallerRequestingAgn { caller };
+                    self.set_radio_state(radio_index, ContestState::CallerRequestingAgn { caller });
                 } else {
                     // Normal flow - have the station send only their exchange (not callsign again)
                     let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
@@ -1101,17 +1351,27 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
-                        radio_index: 0,
+                        radio_index,
                     }));
 
-                    self.state = ContestState::ReceivingExchange { caller };
+                    self.set_radio_state(radio_index, ContestState::ReceivingExchange { caller });
                 }
             }
         }
     }
 
     fn check_waiting_for_agn(&mut self) {
-        if let ContestState::WaitingForAgn { caller, wait_until } = &self.state {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_for_agn_for_radio(0);
+            self.check_waiting_for_agn_for_radio(1);
+        } else {
+            self.check_waiting_for_agn_for_radio(0);
+        }
+    }
+
+    fn check_waiting_for_agn_for_radio(&mut self, radio_index: u8) {
+        let current_state = self.get_radio_state(radio_index);
+        if let ContestState::WaitingForAgn { caller, wait_until } = &current_state {
             if Instant::now() >= *wait_until {
                 let caller = caller.clone();
 
@@ -1125,19 +1385,29 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
-                    radio_index: 0,
+                    radio_index,
                 }));
 
-                self.state = ContestState::ReceivingExchange { caller };
+                self.set_radio_state(radio_index, ContestState::ReceivingExchange { caller });
             }
         }
     }
 
     fn check_waiting_for_callsign_agn(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_for_callsign_agn_for_radio(0);
+            self.check_waiting_for_callsign_agn_for_radio(1);
+        } else {
+            self.check_waiting_for_callsign_agn_for_radio(0);
+        }
+    }
+
+    fn check_waiting_for_callsign_agn_for_radio(&mut self, radio_index: u8) {
+        let current_state = self.get_radio_state(radio_index);
         if let ContestState::WaitingForCallsignAgn {
             callers,
             wait_until,
-        } = &self.state
+        } = &current_state
         {
             if Instant::now() >= *wait_until {
                 let callers = callers.clone();
@@ -1151,29 +1421,48 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
-                        radio_index: 0,
+                        radio_index,
                     }));
                 }
 
                 // Go back to StationsCalling
-                self.state = ContestState::StationsCalling { callers };
+                self.set_radio_state(radio_index, ContestState::StationsCalling { callers });
             }
         }
     }
 
     fn check_waiting_for_partial_response(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_for_partial_response_for_radio(0);
+            self.check_waiting_for_partial_response_for_radio(1);
+        } else {
+            self.check_waiting_for_partial_response_for_radio(0);
+        }
+    }
+
+    fn check_waiting_for_partial_response_for_radio(&mut self, radio_index: u8) {
+        let current_state = self.get_radio_state(radio_index);
         if let ContestState::WaitingForPartialResponse {
             callers,
             wait_until,
-        } = &self.state
+        } = &current_state
         {
             if Instant::now() >= *wait_until {
                 let callers = callers.clone();
 
                 if callers.is_empty() {
                     // No matching callers - no response, go back to waiting for callers
-                    self.state = ContestState::WaitingForCallers;
-                    self.last_cq_finished = Some(Instant::now());
+                    self.set_radio_state(radio_index, ContestState::WaitingForCallers);
+                    // Update last_cq_finished for correct radio
+                    if self.settings.user.two_bsiq_enabled {
+                        if radio_index == 0 {
+                            self.radio1.last_cq_finished = Some(Instant::now());
+                        } else {
+                            self.radio2.last_cq_finished = Some(Instant::now());
+                        }
+                    } else {
+                        self.last_cq_finished = Some(Instant::now());
+                    }
                 } else {
                     // Station(s) repeat their callsign
                     for caller in &callers {
@@ -1184,25 +1473,35 @@ impl ContestApp {
                             frequency_offset_hz: caller.params.frequency_offset_hz,
                             wpm: caller.params.wpm,
                             amplitude: caller.params.amplitude,
-                            radio_index: 0,
+                            radio_index,
                         }));
                     }
 
                     // Go back to StationsCalling with only the matching callers
-                    self.state = ContestState::StationsCalling { callers };
+                    self.set_radio_state(radio_index, ContestState::StationsCalling { callers });
                 }
             }
         }
     }
 
     fn check_waiting_to_send_call_correction(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_to_send_call_correction_for_radio(0);
+            self.check_waiting_to_send_call_correction_for_radio(1);
+        } else {
+            self.check_waiting_to_send_call_correction_for_radio(0);
+        }
+    }
+
+    fn check_waiting_to_send_call_correction_for_radio(&mut self, radio_index: u8) {
         use rand::Rng;
 
+        let current_state = self.get_radio_state(radio_index);
         if let ContestState::WaitingToSendCallCorrection {
             caller,
             correction_attempts,
             wait_until,
-        } = &self.state
+        } = &current_state
         {
             if Instant::now() >= *wait_until {
                 let caller = caller.clone();
@@ -1223,23 +1522,36 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
-                    radio_index: 0,
+                    radio_index,
                 }));
 
-                self.state = ContestState::SendingCallCorrection {
-                    caller,
-                    correction_attempts,
-                };
+                self.set_radio_state(
+                    radio_index,
+                    ContestState::SendingCallCorrection {
+                        caller,
+                        correction_attempts,
+                    },
+                );
             }
         }
     }
 
     fn check_waiting_for_callsign_agn_from_correction(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_for_callsign_agn_from_correction_for_radio(0);
+            self.check_waiting_for_callsign_agn_from_correction_for_radio(1);
+        } else {
+            self.check_waiting_for_callsign_agn_from_correction_for_radio(0);
+        }
+    }
+
+    fn check_waiting_for_callsign_agn_from_correction_for_radio(&mut self, radio_index: u8) {
+        let current_state = self.get_radio_state(radio_index);
         if let ContestState::WaitingForCallsignAgnFromCorrection {
             caller,
             correction_attempts,
             wait_until,
-        } = &self.state
+        } = &current_state
         {
             if Instant::now() >= *wait_until {
                 let caller = caller.clone();
@@ -1253,24 +1565,37 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
-                    radio_index: 0,
+                    radio_index,
                 }));
 
                 // Track that station is sending callsign repeat, will return to WaitingForCallCorrection when done
-                self.state = ContestState::SendingCorrectionRepeat {
-                    caller,
-                    correction_attempts,
-                };
+                self.set_radio_state(
+                    radio_index,
+                    ContestState::SendingCorrectionRepeat {
+                        caller,
+                        correction_attempts,
+                    },
+                );
             }
         }
     }
 
     fn check_waiting_for_partial_response_from_correction(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            self.check_waiting_for_partial_response_from_correction_for_radio(0);
+            self.check_waiting_for_partial_response_from_correction_for_radio(1);
+        } else {
+            self.check_waiting_for_partial_response_from_correction_for_radio(0);
+        }
+    }
+
+    fn check_waiting_for_partial_response_from_correction_for_radio(&mut self, radio_index: u8) {
+        let current_state = self.get_radio_state(radio_index);
         if let ContestState::WaitingForPartialResponseFromCorrection {
             caller,
             correction_attempts,
             wait_until,
-        } = &self.state
+        } = &current_state
         {
             if Instant::now() >= *wait_until {
                 let caller = caller.clone();
@@ -1284,19 +1609,90 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
-                    radio_index: 0,
+                    radio_index,
                 }));
 
                 // Track that station is sending callsign, will return to WaitingForCallCorrection when done
-                self.state = ContestState::SendingCorrectionRepeat {
-                    caller,
-                    correction_attempts,
-                };
+                self.set_radio_state(
+                    radio_index,
+                    ContestState::SendingCorrectionRepeat {
+                        caller,
+                        correction_attempts,
+                    },
+                );
             }
         }
     }
 
     fn maybe_spawn_callers(&mut self) {
+        if self.settings.user.two_bsiq_enabled {
+            // In 2BSIQ mode, check both radios independently
+            self.maybe_spawn_callers_for_radio(RadioId::Radio1);
+            self.maybe_spawn_callers_for_radio(RadioId::Radio2);
+        } else {
+            // Single radio mode - use main state
+            self.maybe_spawn_callers_single();
+        }
+    }
+
+    /// Spawn callers for a specific radio in 2BSIQ mode
+    fn maybe_spawn_callers_for_radio(&mut self, radio_id: RadioId) {
+        let (radio_state, caller_manager, last_cq_finished) = match radio_id {
+            RadioId::Radio1 => (
+                &mut self.radio1.state,
+                &mut self.caller_manager,
+                self.radio1.last_cq_finished,
+            ),
+            RadioId::Radio2 => (
+                &mut self.radio2.state,
+                &mut self.caller_manager2,
+                self.radio2.last_cq_finished,
+            ),
+        };
+
+        if !matches!(radio_state, ContestState::WaitingForCallers) {
+            return;
+        }
+
+        // Wait a bit after CQ before callers respond
+        if let Some(finished) = last_cq_finished {
+            if finished.elapsed().as_millis() < 300 {
+                return;
+            }
+        }
+
+        // Get callers from the persistent queue
+        let responding = caller_manager.on_cq_complete(
+            self.contest.as_ref(),
+            Some(&self.settings.user.callsign),
+            Some(&self.cty),
+        );
+
+        if !responding.is_empty() {
+            let mut callers = Vec::new();
+
+            for params in responding {
+                // Station sends their callsign
+                let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
+                callers.push(ActiveCaller { params });
+            }
+
+            // Update the radio's state directly
+            let radio_state = match radio_id {
+                RadioId::Radio1 => &mut self.radio1.state,
+                RadioId::Radio2 => &mut self.radio2.state,
+            };
+            *radio_state = ContestState::StationsCalling { callers };
+
+            // If this is the focused radio, also update main state
+            if radio_id == self.focused_radio {
+                self.state = radio_state.clone();
+            }
+        }
+    }
+
+    /// Spawn callers in single-radio mode
+    fn maybe_spawn_callers_single(&mut self) {
         if !matches!(self.state, ContestState::WaitingForCallers) {
             return;
         }
@@ -1387,10 +1783,10 @@ impl ContestApp {
 
             // F1 - Send CQ (always available - persistent callers may retry)
             if i.key_pressed(Key::F1) {
-                // Stop any playing audio
-                let _ = self.cmd_tx.send(AudioCommand::StopAll);
+                // Stop any playing audio on focused radio only
+                self.stop_focused_radio_audio();
                 // Notify caller manager that CQ is restarting (callers get another chance)
-                self.caller_manager.on_cq_restart();
+                self.focused_caller_manager().on_cq_restart();
                 self.callsign_input.clear();
                 self.exchange_input.clear();
                 self.current_field = InputField::Callsign;
@@ -1474,8 +1870,8 @@ impl ContestApp {
                     InputField::Callsign => {
                         if self.callsign_input.trim().is_empty() {
                             // Empty callsign field - act like F1 (send CQ)
-                            let _ = self.cmd_tx.send(AudioCommand::StopAll);
-                            self.caller_manager.on_cq_restart();
+                            self.stop_focused_radio_audio();
+                            self.focused_caller_manager().on_cq_restart();
                             self.callsign_input.clear();
                             self.exchange_input.clear();
                             self.current_field = InputField::Callsign;
@@ -1495,7 +1891,7 @@ impl ContestApp {
                 self.callsign_input.clear();
                 self.exchange_input.clear();
                 self.current_field = InputField::Callsign;
-                let _ = self.cmd_tx.send(AudioCommand::StopAll);
+                self.stop_focused_radio_audio();
             }
 
             // Tab - Switch fields
@@ -1570,12 +1966,17 @@ impl ContestApp {
 
 impl eframe::App for ContestApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Sync focused radio state at start of frame (2BSIQ mode)
+        // This ensures any changes made to self.state are persisted to the radio state
+        self.sync_to_radio_state();
+
         // One-time audio initialization on first frame
         if !self.audio_initialized {
             self.send_2bsiq_mode_update();
             self.send_latch_mode_update();
             if self.settings.user.two_bsiq_enabled {
                 self.send_stereo_mode_update();
+                self.send_radio_volumes();
             }
             self.audio_initialized = true;
         }

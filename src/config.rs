@@ -26,6 +26,16 @@ pub struct UserSettings {
     /// Latch mode: during TX, hear the other radio in both ears
     #[serde(default)]
     pub latch_mode: bool,
+    /// Volume for Radio 1 (0.0 to 1.0)
+    #[serde(default = "default_radio_volume")]
+    pub radio1_volume: f32,
+    /// Volume for Radio 2 (0.0 to 1.0)
+    #[serde(default = "default_radio_volume")]
+    pub radio2_volume: f32,
+}
+
+fn default_radio_volume() -> f32 {
+    1.0
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -154,6 +164,8 @@ impl Default for UserSettings {
             show_status_line: true,
             two_bsiq_enabled: false,
             latch_mode: false,
+            radio1_volume: 1.0,
+            radio2_volume: 1.0,
         }
     }
 }

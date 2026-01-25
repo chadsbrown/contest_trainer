@@ -32,8 +32,13 @@ pub enum AudioCommand {
     },
     /// Update global audio settings
     UpdateSettings(AudioSettings),
-    /// Stop all audio (except noise)
+    /// Stop all audio (except noise) - use StopRadio in 2BSIQ mode
     StopAll,
+    /// Stop audio for a specific radio only (for 2BSIQ mode)
+    StopRadio {
+        /// Which radio to stop (0 = Radio 1, 1 = Radio 2)
+        radio_index: u8,
+    },
     /// Update 2BSIQ stereo routing mode
     UpdateStereoMode {
         /// Whether stereo separation is enabled (true = L/R split, false = focused to both)
@@ -51,6 +56,13 @@ pub enum AudioCommand {
         /// Whether latch mode is enabled
         enabled: bool,
     },
+    /// Update per-radio volume levels
+    UpdateRadioVolumes {
+        /// Volume for Radio 1 (0.0 to 1.0)
+        radio1_volume: f32,
+        /// Volume for Radio 2 (0.0 to 1.0)
+        radio2_volume: f32,
+    },
 }
 
 /// Messages from Audio thread to UI thread
@@ -58,6 +70,6 @@ pub enum AudioCommand {
 pub enum AudioEvent {
     /// Station finished sending its message (includes radio_index for 2BSIQ routing)
     StationComplete { id: StationId, radio_index: u8 },
-    /// User message finished playing
-    UserMessageComplete,
+    /// User message finished playing (includes radio_index for 2BSIQ routing)
+    UserMessageComplete { radio_index: u8 },
 }

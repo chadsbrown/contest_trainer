@@ -81,7 +81,7 @@ impl AudioEngine {
             move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                 let num_frames = data.len() / channels;
 
-                let (completed_stations, user_completed) = if channels == 2 {
+                let (completed_stations, user_completed_radio) = if channels == 2 {
                     // Stereo output: use stereo mixer for proper L/R separation
                     let mut stereo_buffer = vec![0.0f32; num_frames * 2];
 
@@ -127,8 +127,8 @@ impl AudioEngine {
                         radio_index,
                     });
                 }
-                if user_completed {
-                    let _ = event_tx.try_send(AudioEvent::UserMessageComplete);
+                if let Some(radio_index) = user_completed_radio {
+                    let _ = event_tx.try_send(AudioEvent::UserMessageComplete { radio_index });
                 }
             },
             |err| {
@@ -174,6 +174,9 @@ impl AudioEngine {
                         AudioCommand::StopAll => {
                             mixer.clear_all();
                         }
+                        AudioCommand::StopRadio { radio_index } => {
+                            mixer.clear_radio(radio_index);
+                        }
                         AudioCommand::UpdateStereoMode {
                             stereo_enabled,
                             focused_radio,
@@ -185,6 +188,12 @@ impl AudioEngine {
                         }
                         AudioCommand::UpdateLatchMode { enabled } => {
                             mixer.update_latch_mode(enabled);
+                        }
+                        AudioCommand::UpdateRadioVolumes {
+                            radio1_volume,
+                            radio2_volume,
+                        } => {
+                            mixer.update_radio_volumes(radio1_volume, radio2_volume);
                         }
                     }
                 }
