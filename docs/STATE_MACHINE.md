@@ -383,15 +383,102 @@ max_correction_attempts = 2
 
 | Command | Description |
 |---------|-------------|
-| `PlayUserMessage { message, wpm }` | Play user's CW message |
+| `PlayUserMessage { message, wpm, radio_index }` | Play user's CW message on specified radio |
 | `StartStation(StationParams)` | Start a station sending CW |
 | `StopStation(id)` | Stop a specific station |
 | `StopAll` | Stop all audio (except noise) |
 | `UpdateSettings(AudioSettings)` | Update audio configuration |
+| `UpdateStereoMode { stereo_enabled, focused_radio }` | Update 2BSIQ stereo routing |
+| `Update2BsiqMode { enabled }` | Enable/disable 2BSIQ mode (controls sidetone) |
+| `UpdateLatchMode { enabled }` | Enable/disable latch mode |
 
 ## Audio Events
 
 | Event | Description |
 |-------|-------------|
 | `UserMessageComplete` | User's transmission finished |
-| `StationComplete(id)` | Station finished transmitting |
+| `StationComplete { id, radio_index }` | Station finished transmitting (includes radio for routing) |
+
+## 2BSIQ (Two Radio) Mode
+
+2BSIQ mode enables simultaneous operation of two radios, with Radio 1 in the left ear and Radio 2 in the right ear.
+
+### Architecture
+
+In 2BSIQ mode, the application maintains parallel state for each radio:
+
+```rust
+pub struct RadioState {
+    pub state: ContestState,
+    pub callsign_input: String,
+    pub exchange_input: String,
+    pub current_field: InputField,
+    pub last_qso_result: Option<QsoResult>,
+    pub last_cq_finished: Option<Instant>,
+    pub used_agn_callsign: bool,
+    pub used_agn_exchange: bool,
+}
+```
+
+The main app fields (`self.state`, `self.callsign_input`, etc.) represent the **focused radio**. A sync mechanism copies state to/from the appropriate `RadioState` when focus changes:
+
+- `sync_to_radio_state()`: Copies main fields → focused radio's RadioState
+- `sync_from_radio_state()`: Copies focused radio's RadioState → main fields
+
+### Caller Management
+
+Each radio has its own `CallerManager`:
+- `caller_manager`: Radio 1 (left channel, `radio_index=0`)
+- `caller_manager2`: Radio 2 (right channel, `radio_index=1`)
+
+Stations are spawned with the appropriate `radio_index` in their `StationParams`, which routes their audio to the correct channel.
+
+### Audio Event Routing
+
+`StationComplete` events include `radio_index` to route to the correct radio's state:
+
+```rust
+AudioEvent::StationComplete { id, radio_index } => {
+    // Route to correct caller manager
+    if radio_index == 1 {
+        self.caller_manager2.station_audio_complete(id);
+    } else {
+        self.caller_manager.station_audio_complete(id);
+    }
+    
+    // Update correct radio's state
+    let state = if radio_index == focused_radio {
+        &mut self.state  // Focused radio uses main state
+    } else {
+        &mut self.radio1.state  // or radio2.state
+    };
+    // ... state transitions
+}
+```
+
+### Audio Routing Modes
+
+| Mode | Behavior |
+|------|----------|
+| **Stereo ON** | Radio 1 → Left ear, Radio 2 → Right ear |
+| **Stereo OFF** | Focused radio → Both ears |
+| **Latch Mode** | During TX, other radio → Both ears |
+
+### TX Behavior
+
+- **No sidetone**: User does not hear their own transmission in 2BSIQ mode
+- **Visual TX indicator**: Shows transmission progress character-by-character
+- **Single TX**: Only one radio can transmit at a time (current limitation)
+
+### 2BSIQ Key Bindings
+
+| Key | Action |
+|-----|--------|
+| Insert | Swap radio focus |
+| ` (backtick) | Toggle stereo mode |
+| Ctrl+Left | Focus Radio 1 |
+| Ctrl+Right | Focus Radio 2 |
+| Ctrl+F1 | Send CQ on alternate radio |
+| Ctrl+F3 | Send TU on alternate radio |
+
+Standard F-keys (F1, F2, F3, etc.) operate on the focused radio.

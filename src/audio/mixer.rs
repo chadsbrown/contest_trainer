@@ -324,6 +324,10 @@ pub struct Mixer {
     pub focused_radio: u8,
     /// 2BSIQ: Whether 2BSIQ mode is enabled (disables sidetone when true)
     pub two_bsiq_enabled: bool,
+    /// 2BSIQ: Latch mode - route other radio to both ears during TX
+    pub latch_mode: bool,
+    /// Which radio is currently transmitting (for TX indicator and latch mode)
+    pub transmitting_radio: u8,
 }
 
 impl Mixer {
@@ -337,6 +341,8 @@ impl Mixer {
             stereo_enabled: true,
             focused_radio: 0,
             two_bsiq_enabled: false,
+            latch_mode: false,
+            transmitting_radio: 0,
         }
     }
 
@@ -351,6 +357,11 @@ impl Mixer {
         self.two_bsiq_enabled = enabled;
     }
 
+    /// Update latch mode (routes other radio to both ears during TX)
+    pub fn update_latch_mode(&mut self, enabled: bool) {
+        self.latch_mode = enabled;
+    }
+
     /// Add a new calling station
     pub fn add_station(&mut self, params: &StationParams, message: &str) {
         let station = ActiveStation::new(
@@ -363,8 +374,9 @@ impl Mixer {
         self.stations.push(station);
     }
 
-    /// Start playing a user message
-    pub fn play_user_message(&mut self, message: &str, wpm: u8) {
+    /// Start playing a user message on the specified radio
+    pub fn play_user_message(&mut self, message: &str, wpm: u8, radio_index: u8) {
+        self.transmitting_radio = radio_index;
         self.user_station = Some(UserStation::new(
             message,
             wpm,
@@ -393,8 +405,8 @@ impl Mixer {
         self.user_station = None;
     }
 
-    /// Fill a buffer with mixed audio (mono), returns list of completed station IDs
-    pub fn fill_buffer(&mut self, buffer: &mut [f32]) -> (Vec<StationId>, bool) {
+    /// Fill a buffer with mixed audio (mono), returns list of completed stations (id, radio_index)
+    pub fn fill_buffer(&mut self, buffer: &mut [f32]) -> (Vec<(StationId, u8)>, bool) {
         let mut completed_stations = Vec::new();
         let mut user_completed = false;
 
@@ -420,7 +432,7 @@ impl Mixer {
                 }
             }
             if station.is_completed() {
-                completed_stations.push(station.id);
+                completed_stations.push((station.id, station.radio_index));
             }
         }
 
@@ -459,18 +471,18 @@ impl Mixer {
     }
 
     /// Get current TX progress for visual indicator
-    /// Returns (message, chars_sent) if user is transmitting, None otherwise
-    pub fn get_tx_progress(&self) -> Option<(&str, usize)> {
+    /// Returns (message, chars_sent, radio_index) if user is transmitting, None otherwise
+    pub fn get_tx_progress(&self) -> Option<(&str, usize, u8)> {
         self.user_station
             .as_ref()
-            .map(|u| (u.message.as_str(), u.chars_sent()))
+            .map(|u| (u.message.as_str(), u.chars_sent(), self.transmitting_radio))
     }
 
     /// Fill a buffer with mixed stereo audio (interleaved L/R pairs)
     /// When stereo_enabled: stations routed based on radio_index (0 = left, 1 = right)
     /// When !stereo_enabled: focused radio goes to both ears
-    /// Returns list of completed station IDs and whether user message completed
-    pub fn fill_stereo_buffer(&mut self, buffer: &mut [f32]) -> (Vec<StationId>, bool) {
+    /// Returns list of completed stations (id, radio_index) and whether user message completed
+    pub fn fill_stereo_buffer(&mut self, buffer: &mut [f32]) -> (Vec<(StationId, u8)>, bool) {
         let mut completed_stations = Vec::new();
         let mut user_completed = false;
 
@@ -482,10 +494,39 @@ impl Mixer {
             *sample = 0.0;
         }
 
-        // Add noise based on stereo mode
-        let mute_noise = self.settings.mute_noise_during_tx && self.user_station.is_some();
+        // Determine audio routing mode:
+        // - Latch active: user is transmitting in 2BSIQ with latch mode enabled
+        //   -> route OTHER radio (not focused) to both ears
+        // - Stereo mode: normal L/R separation
+        // - Mono mode: focused radio to both ears
+        let is_transmitting = self.user_station.is_some();
+        let latch_active = self.two_bsiq_enabled && self.latch_mode && is_transmitting;
+
+        // When latch is active, we want to hear the OTHER radio (not the one we're TXing on)
+        // transmitting_radio is the one sending, so we hear the opposite
+        let latch_radio = if self.transmitting_radio == 0 {
+            1u8
+        } else {
+            0u8
+        };
+
+        // Add noise based on routing mode
+        let mute_noise = self.settings.mute_noise_during_tx && is_transmitting;
         if !mute_noise {
-            if self.stereo_enabled {
+            if latch_active {
+                // Latch mode: other radio's noise to both ears
+                for frame_idx in 0..num_frames {
+                    let noise_sample = if latch_radio == 0 {
+                        self.noise
+                            .next_sample(self.settings.noise_level, &self.settings.noise)
+                    } else {
+                        self.noise_right
+                            .next_sample(self.settings.noise_level, &self.settings.noise)
+                    };
+                    buffer[frame_idx * 2] += noise_sample; // Left
+                    buffer[frame_idx * 2 + 1] += noise_sample; // Right
+                }
+            } else if self.stereo_enabled {
                 // Stereo mode: independent noise per channel
                 for frame_idx in 0..num_frames {
                     let noise_left = self
@@ -513,9 +554,23 @@ impl Mixer {
             }
         }
 
-        // Mix each calling station based on stereo mode
+        // Mix each calling station based on routing mode
         for station in &mut self.stations {
-            if self.stereo_enabled {
+            if latch_active {
+                // Latch mode: only hear other radio (not focused), route to both ears
+                let dominated = station.radio_index == latch_radio;
+                for frame_idx in 0..num_frames {
+                    if let Some(station_sample) = station.next_sample() {
+                        if dominated {
+                            buffer[frame_idx * 2] += station_sample; // Left
+                            buffer[frame_idx * 2 + 1] += station_sample; // Right
+                        }
+                        // Focused radio stations are silenced during latch
+                    } else {
+                        break;
+                    }
+                }
+            } else if self.stereo_enabled {
                 // Stereo mode: route to appropriate channel based on radio_index
                 let channel_offset = station.radio_index as usize; // 0 = left, 1 = right
                 for frame_idx in 0..num_frames {
@@ -541,7 +596,7 @@ impl Mixer {
                 }
             }
             if station.is_completed() {
-                completed_stations.push(station.id);
+                completed_stations.push((station.id, station.radio_index));
             }
         }
 

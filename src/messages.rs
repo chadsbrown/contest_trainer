@@ -24,7 +24,12 @@ pub enum AudioCommand {
     /// Start playing morse for a station
     StartStation(StationParams),
     /// Play a message as the user's station (CQ, exchange, TU)
-    PlayUserMessage { message: String, wpm: u8 },
+    PlayUserMessage {
+        message: String,
+        wpm: u8,
+        /// Which radio is transmitting (0 = Radio 1, 1 = Radio 2)
+        radio_index: u8,
+    },
     /// Update global audio settings
     UpdateSettings(AudioSettings),
     /// Stop all audio (except noise)
@@ -41,13 +46,18 @@ pub enum AudioCommand {
         /// Whether 2BSIQ mode is enabled
         enabled: bool,
     },
+    /// Update latch mode setting (routes other radio to both ears during TX)
+    UpdateLatchMode {
+        /// Whether latch mode is enabled
+        enabled: bool,
+    },
 }
 
 /// Messages from Audio thread to UI thread
 #[derive(Clone, Debug)]
 pub enum AudioEvent {
-    /// Station finished sending its message
-    StationComplete(StationId),
+    /// Station finished sending its message (includes radio_index for 2BSIQ routing)
+    StationComplete { id: StationId, radio_index: u8 },
     /// User message finished playing
     UserMessageComplete,
 }

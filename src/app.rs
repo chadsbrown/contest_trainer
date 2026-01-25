@@ -161,8 +161,6 @@ pub struct RadioState {
     pub current_field: InputField,
     pub last_qso_result: Option<QsoResult>,
     pub last_cq_finished: Option<Instant>,
-    /// Current TX message being sent (for visual indicator)
-    pub current_tx_message: Option<String>,
     /// AGN usage tracking for current QSO
     pub used_agn_callsign: bool,
     pub used_agn_exchange: bool,
@@ -177,22 +175,9 @@ impl RadioState {
             current_field: InputField::Callsign,
             last_qso_result: None,
             last_cq_finished: None,
-            current_tx_message: None,
             used_agn_callsign: false,
             used_agn_exchange: false,
         }
-    }
-
-    pub fn reset(&mut self) {
-        self.state = ContestState::Idle;
-        self.callsign_input.clear();
-        self.exchange_input.clear();
-        self.current_field = InputField::Callsign;
-        self.last_qso_result = None;
-        self.last_cq_finished = None;
-        self.current_tx_message = None;
-        self.used_agn_callsign = false;
-        self.used_agn_exchange = false;
     }
 }
 
@@ -332,16 +317,8 @@ impl ContestApp {
             let cwt_callsigns2 = CwtCallsignPool::load(&settings.contest.cwt_callsign_file)
                 .unwrap_or_else(|_| CwtCallsignPool::default_pool());
             (
-                CallerManager::new_cwt_with_radio_index(
-                    cwt_callsigns,
-                    settings.simulation.clone(),
-                    0,
-                ),
-                CallerManager::new_cwt_with_radio_index(
-                    cwt_callsigns2,
-                    settings.simulation.clone(),
-                    1,
-                ),
+                CallerManager::new_cwt(cwt_callsigns, settings.simulation.clone(), 0),
+                CallerManager::new_cwt(cwt_callsigns2, settings.simulation.clone(), 1),
             )
         } else {
             let callsigns = CallsignPool::load(&settings.contest.callsign_file)
@@ -349,8 +326,8 @@ impl ContestApp {
             let callsigns2 = CallsignPool::load(&settings.contest.callsign_file)
                 .unwrap_or_else(|_| CallsignPool::default_pool());
             (
-                CallerManager::new_with_radio_index(callsigns, settings.simulation.clone(), 0),
-                CallerManager::new_with_radio_index(callsigns2, settings.simulation.clone(), 1),
+                CallerManager::new(callsigns, settings.simulation.clone(), 0),
+                CallerManager::new(callsigns2, settings.simulation.clone(), 1),
             )
         };
 
@@ -435,202 +412,11 @@ impl ContestApp {
         });
     }
 
-    /// Get the current contest state (uses focused radio state in 2BSIQ mode)
-    fn current_state(&self) -> &ContestState {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => &self.radio1.state,
-                RadioId::Radio2 => &self.radio2.state,
-            }
-        } else {
-            &self.state
-        }
-    }
-
-    /// Get mutable reference to current contest state
-    fn current_state_mut(&mut self) -> &mut ContestState {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => &mut self.radio1.state,
-                RadioId::Radio2 => &mut self.radio2.state,
-            }
-        } else {
-            &mut self.state
-        }
-    }
-
-    /// Get current callsign input (uses focused radio in 2BSIQ mode)
-    fn current_callsign_input(&self) -> &str {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => &self.radio1.callsign_input,
-                RadioId::Radio2 => &self.radio2.callsign_input,
-            }
-        } else {
-            &self.callsign_input
-        }
-    }
-
-    /// Get mutable reference to current callsign input
-    fn current_callsign_input_mut(&mut self) -> &mut String {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => &mut self.radio1.callsign_input,
-                RadioId::Radio2 => &mut self.radio2.callsign_input,
-            }
-        } else {
-            &mut self.callsign_input
-        }
-    }
-
-    /// Get current exchange input (uses focused radio in 2BSIQ mode)
-    fn current_exchange_input(&self) -> &str {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => &self.radio1.exchange_input,
-                RadioId::Radio2 => &self.radio2.exchange_input,
-            }
-        } else {
-            &self.exchange_input
-        }
-    }
-
-    /// Get mutable reference to current exchange input
-    fn current_exchange_input_mut(&mut self) -> &mut String {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => &mut self.radio1.exchange_input,
-                RadioId::Radio2 => &mut self.radio2.exchange_input,
-            }
-        } else {
-            &mut self.exchange_input
-        }
-    }
-
-    /// Get current input field (uses focused radio in 2BSIQ mode)
-    fn current_field(&self) -> InputField {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.current_field,
-                RadioId::Radio2 => self.radio2.current_field,
-            }
-        } else {
-            self.current_field
-        }
-    }
-
-    /// Set current input field
-    fn set_current_field(&mut self, field: InputField) {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.current_field = field,
-                RadioId::Radio2 => self.radio2.current_field = field,
-            }
-        } else {
-            self.current_field = field;
-        }
-    }
-
-    /// Get the CallerManager for the focused radio
-    fn current_caller_manager(&mut self) -> &mut CallerManager {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => &mut self.caller_manager,
-                RadioId::Radio2 => &mut self.caller_manager2,
-            }
-        } else {
-            &mut self.caller_manager
-        }
-    }
-
-    /// Get the radio_index for the focused radio
-    fn current_radio_index(&self) -> u8 {
-        if self.settings.user.two_bsiq_enabled {
-            self.focused_radio.audio_index()
-        } else {
-            0
-        }
-    }
-
-    /// Get last_cq_finished for the focused radio
-    fn current_last_cq_finished(&self) -> Option<Instant> {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.last_cq_finished,
-                RadioId::Radio2 => self.radio2.last_cq_finished,
-            }
-        } else {
-            self.last_cq_finished
-        }
-    }
-
-    /// Set last_cq_finished for the focused radio
-    fn set_last_cq_finished(&mut self, time: Option<Instant>) {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.last_cq_finished = time,
-                RadioId::Radio2 => self.radio2.last_cq_finished = time,
-            }
-        } else {
-            self.last_cq_finished = time;
-        }
-    }
-
-    /// Get/set AGN tracking for current radio
-    fn current_used_agn_callsign(&self) -> bool {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.used_agn_callsign,
-                RadioId::Radio2 => self.radio2.used_agn_callsign,
-            }
-        } else {
-            self.used_agn_callsign
-        }
-    }
-
-    fn set_used_agn_callsign(&mut self, value: bool) {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.used_agn_callsign = value,
-                RadioId::Radio2 => self.radio2.used_agn_callsign = value,
-            }
-        } else {
-            self.used_agn_callsign = value;
-        }
-    }
-
-    fn current_used_agn_exchange(&self) -> bool {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.used_agn_exchange,
-                RadioId::Radio2 => self.radio2.used_agn_exchange,
-            }
-        } else {
-            self.used_agn_exchange
-        }
-    }
-
-    fn set_used_agn_exchange(&mut self, value: bool) {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.used_agn_exchange = value,
-                RadioId::Radio2 => self.radio2.used_agn_exchange = value,
-            }
-        } else {
-            self.used_agn_exchange = value;
-        }
-    }
-
-    /// Set last QSO result for current radio
-    fn set_last_qso_result(&mut self, result: Option<QsoResult>) {
-        if self.settings.user.two_bsiq_enabled {
-            match self.focused_radio {
-                RadioId::Radio1 => self.radio1.last_qso_result = result,
-                RadioId::Radio2 => self.radio2.last_qso_result = result,
-            }
-        } else {
-            self.last_qso_result = result;
-        }
+    /// Send latch mode update to audio engine
+    fn send_latch_mode_update(&self) {
+        let _ = self.cmd_tx.send(AudioCommand::UpdateLatchMode {
+            enabled: self.settings.user.latch_mode,
+        });
     }
 
     /// Sync main app fields to focused RadioState (for 2BSIQ mode)
@@ -671,26 +457,36 @@ impl ContestApp {
     }
 
     /// Get current TX progress for visual indicator (2BSIQ mode)
-    /// Returns (message, chars_sent) if user is transmitting, None otherwise
-    pub fn get_tx_progress(&self) -> Option<(String, usize)> {
+    /// Returns (message, chars_sent, radio_index) if user is transmitting, None otherwise
+    pub fn get_tx_progress(&self) -> Option<(String, usize, u8)> {
         self.audio_engine.as_ref().and_then(|e| e.get_tx_progress())
     }
 
     fn send_cq(&mut self) {
+        self.send_cq_on_radio(self.focused_radio.audio_index());
+    }
+
+    /// Send CQ on a specific radio (used for Ctrl+F1 on alternate radio)
+    fn send_cq_on_radio(&mut self, radio_index: u8) {
         let cq_prefix = self.settings.contest.cq_message.trim();
         let callsign = self.settings.user.callsign.trim();
         let message = format!("{} {}", cq_prefix, callsign);
         let wpm = self.settings.user.wpm;
 
-        let _ = self
-            .cmd_tx
-            .send(AudioCommand::PlayUserMessage { message, wpm });
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
+            message,
+            wpm,
+            radio_index,
+        });
 
-        self.state = ContestState::CallingCq;
+        // Only update state if sending on focused radio
+        if radio_index == self.focused_radio.audio_index() {
+            self.state = ContestState::CallingCq;
 
-        // Reset AGN tracking for new QSO
-        self.used_agn_callsign = false;
-        self.used_agn_exchange = false;
+            // Reset AGN tracking for new QSO
+            self.used_agn_callsign = false;
+            self.used_agn_exchange = false;
+        }
     }
 
     fn send_exchange(&mut self, their_call: &str) {
@@ -705,9 +501,11 @@ impl ContestApp {
         let message = format!("{} {}", their_call, exchange);
         let wpm = self.settings.user.wpm;
 
-        let _ = self
-            .cmd_tx
-            .send(AudioCommand::PlayUserMessage { message, wpm });
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
+            message,
+            wpm,
+            radio_index: self.focused_radio.audio_index(),
+        });
     }
 
     fn send_exchange_only(&mut self) {
@@ -724,16 +522,24 @@ impl ContestApp {
         let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
             message: exchange,
             wpm,
+            radio_index: self.focused_radio.audio_index(),
         });
     }
 
     fn send_tu(&mut self) {
+        self.send_tu_on_radio(self.focused_radio.audio_index());
+    }
+
+    /// Send TU on a specific radio (used for Ctrl+F3 on alternate radio)
+    fn send_tu_on_radio(&mut self, radio_index: u8) {
         let message = format!("TU {}", self.settings.user.callsign);
         let wpm = self.settings.user.wpm;
 
-        let _ = self
-            .cmd_tx
-            .send(AudioCommand::PlayUserMessage { message, wpm });
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
+            message,
+            wpm,
+            radio_index,
+        });
     }
 
     fn send_partial_query(&mut self, partial: &str) {
@@ -743,6 +549,7 @@ impl ContestApp {
         let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
             message: partial.to_string(),
             wpm,
+            radio_index: self.focused_radio.audio_index(),
         });
     }
 
@@ -1002,6 +809,7 @@ impl ContestApp {
         let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
             message: agn_message,
             wpm: self.settings.user.wpm,
+            radio_index: self.focused_radio.audio_index(),
         });
 
         self.state = ContestState::SendingAgn { caller };
@@ -1027,6 +835,7 @@ impl ContestApp {
         let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
             message: agn_message,
             wpm: self.settings.user.wpm,
+            radio_index: self.focused_radio.audio_index(),
         });
 
         // Transition to appropriate state based on context
@@ -1045,21 +854,43 @@ impl ContestApp {
     fn process_audio_events(&mut self) {
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
-                AudioEvent::StationComplete(id) => {
-                    self.caller_manager.station_audio_complete(id);
+                AudioEvent::StationComplete { id, radio_index } => {
+                    // Route to correct caller manager based on radio
+                    if self.settings.user.two_bsiq_enabled && radio_index == 1 {
+                        self.caller_manager2.station_audio_complete(id);
+                    } else {
+                        self.caller_manager.station_audio_complete(id);
+                    }
+
+                    // Get reference to the correct state for this radio
+                    // In 2BSIQ mode, events from non-focused radio update that radio's state directly
+                    let (state, is_focused) = if self.settings.user.two_bsiq_enabled {
+                        let focused_index = self.focused_radio.audio_index();
+                        if radio_index == focused_index {
+                            (&mut self.state, true)
+                        } else if radio_index == 0 {
+                            (&mut self.radio1.state, false)
+                        } else {
+                            (&mut self.radio2.state, false)
+                        }
+                    } else {
+                        (&mut self.state, true)
+                    };
+                    let _ = is_focused; // May use later for focused-only logic
 
                     // If we were waiting for their exchange, move to logging
-                    if let ContestState::ReceivingExchange { ref caller } = self.state {
+                    if let ContestState::ReceivingExchange { ref caller } = state {
                         if caller.params.id == id {
                             // Exchange received, user can now log
                         }
                     }
 
                     // If caller was requesting AGN, transition to waiting for user to resend
-                    if let ContestState::CallerRequestingAgn { ref caller } = self.state {
+                    if let ContestState::CallerRequestingAgn { ref caller } = state.clone() {
                         if caller.params.id == id {
-                            let caller = caller.clone();
-                            self.state = ContestState::WaitingForUserExchangeRepeat { caller };
+                            *state = ContestState::WaitingForUserExchangeRepeat {
+                                caller: caller.clone(),
+                            };
                         }
                     }
 
@@ -1067,13 +898,12 @@ impl ContestApp {
                     if let ContestState::SendingCallCorrection {
                         ref caller,
                         correction_attempts,
-                    } = self.state
+                    } = state.clone()
                     {
                         if caller.params.id == id {
-                            let caller = caller.clone();
                             // Wait for user to correct callsign and resend
-                            self.state = ContestState::WaitingForCallCorrection {
-                                caller,
+                            *state = ContestState::WaitingForCallCorrection {
+                                caller: caller.clone(),
                                 correction_attempts,
                             };
                         }
@@ -1083,13 +913,12 @@ impl ContestApp {
                     if let ContestState::SendingCorrectionRepeat {
                         ref caller,
                         correction_attempts,
-                    } = self.state
+                    } = state.clone()
                     {
                         if caller.params.id == id {
-                            let caller = caller.clone();
                             // Return to waiting for user to correct callsign
-                            self.state = ContestState::WaitingForCallCorrection {
-                                caller,
+                            *state = ContestState::WaitingForCallCorrection {
+                                caller: caller.clone(),
                                 correction_attempts,
                             };
                         }
@@ -1540,6 +1369,20 @@ impl ContestApp {
                     }
                     return; // Don't process as anything else
                 }
+
+                // Ctrl+F1 - Send CQ on alternate (non-focused) radio
+                if i.modifiers.ctrl && i.key_pressed(Key::F1) {
+                    let alt_radio = self.focused_radio.other().audio_index();
+                    self.send_cq_on_radio(alt_radio);
+                    return;
+                }
+
+                // Ctrl+F3 - Send TU on alternate radio
+                if i.modifiers.ctrl && i.key_pressed(Key::F3) {
+                    let alt_radio = self.focused_radio.other().audio_index();
+                    self.send_tu_on_radio(alt_radio);
+                    return;
+                }
             }
 
             // F1 - Send CQ (always available - persistent callers may retry)
@@ -1670,20 +1513,40 @@ impl ContestApp {
             // Update contest type
             self.contest = contest::create_contest(self.settings.contest.contest_type);
 
-            // Update callsigns based on contest type
+            // Update callsigns based on contest type (load separately for each manager)
             if self.settings.contest.contest_type == ContestType::Cwt {
-                let cwt_callsigns = CwtCallsignPool::load(&self.settings.contest.cwt_callsign_file)
-                    .unwrap_or_else(|_| CwtCallsignPool::default_pool());
-                self.caller_manager.update_cwt_callsigns(cwt_callsigns);
+                let cwt_callsigns1 =
+                    CwtCallsignPool::load(&self.settings.contest.cwt_callsign_file)
+                        .unwrap_or_else(|_| CwtCallsignPool::default_pool());
+                let cwt_callsigns2 =
+                    CwtCallsignPool::load(&self.settings.contest.cwt_callsign_file)
+                        .unwrap_or_else(|_| CwtCallsignPool::default_pool());
+                self.caller_manager.update_cwt_callsigns(cwt_callsigns1);
+                self.caller_manager2.update_cwt_callsigns(cwt_callsigns2);
             } else {
-                let callsigns = CallsignPool::load(&self.settings.contest.callsign_file)
+                let callsigns1 = CallsignPool::load(&self.settings.contest.callsign_file)
                     .unwrap_or_else(|_| CallsignPool::default_pool());
-                self.caller_manager.update_callsigns(callsigns);
+                let callsigns2 = CallsignPool::load(&self.settings.contest.callsign_file)
+                    .unwrap_or_else(|_| CallsignPool::default_pool());
+                self.caller_manager.update_callsigns(callsigns1);
+                self.caller_manager2.update_callsigns(callsigns2);
             }
 
-            // Update caller manager settings
+            // Update caller manager settings (both managers)
             self.caller_manager
                 .update_settings(self.settings.simulation.clone());
+            self.caller_manager2
+                .update_settings(self.settings.simulation.clone());
+
+            // Handle 2BSIQ mode changes - reset Radio 2 state when disabled
+            if !self.settings.user.two_bsiq_enabled {
+                // Clear Radio 2 state when 2BSIQ is disabled
+                self.radio2 = RadioState::new();
+                self.caller_manager2.clear_all_callers();
+                // Reset focus to Radio 1 and stereo to default for next enable
+                self.focused_radio = RadioId::Radio1;
+                self.stereo_enabled = true;
+            }
 
             // Update audio settings
             let _ = self
@@ -1692,6 +1555,7 @@ impl ContestApp {
 
             // Update 2BSIQ mode for sidetone control
             self.send_2bsiq_mode_update();
+            self.send_latch_mode_update();
 
             // Save settings to file
             if let Err(_e) = self.settings.save() {
@@ -1709,6 +1573,7 @@ impl eframe::App for ContestApp {
         // One-time audio initialization on first frame
         if !self.audio_initialized {
             self.send_2bsiq_mode_update();
+            self.send_latch_mode_update();
             if self.settings.user.two_bsiq_enabled {
                 self.send_stereo_mode_update();
             }

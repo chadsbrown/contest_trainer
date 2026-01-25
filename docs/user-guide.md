@@ -31,6 +31,75 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 
 ---
 
+## 2BSIQ Mode (Two Radio Operation)
+
+2BSIQ (Two Bands, Signals In Queue) is an advanced operating technique where you work two radios simultaneously. This mode is designed for experienced contesters who want to practice the mental discipline of managing parallel QSOs.
+
+### Enabling 2BSIQ Mode
+
+Enable 2BSIQ mode in **File > Settings** under User Settings. Once enabled, the main window displays two radio panels side by side.
+
+### Audio Routing
+
+In 2BSIQ mode, audio is separated by stereo channel:
+- **Radio 1**: Left ear only
+- **Radio 2**: Right ear only
+
+Each radio has its own independent noise generator for realism.
+
+**Stereo Toggle**: Press **` (backtick)** to toggle stereo mode:
+- **Stereo ON**: Radio 1 → left ear, Radio 2 → right ear (true 2BSIQ)
+- **Stereo OFF**: Focused radio → both ears (concentrate on one radio)
+
+**No Sidetone**: In 2BSIQ mode, you do not hear your own transmissions. Instead, a visual TX indicator shows your transmission progress character-by-character, synchronized with audio timing.
+
+### Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| **Insert** | Swap focus to other radio (moves TX and RX focus) |
+| **` (backtick)** | Toggle stereo mode on/off |
+| **Ctrl+Left Arrow** | Move focus to Radio 1 (left) |
+| **Ctrl+Right Arrow** | Move focus to Radio 2 (right) |
+| **Ctrl+F1** | Send CQ on alternate (non-focused) radio |
+| **Ctrl+F3** | Send TU on alternate (non-focused) radio |
+
+Standard keys (F1, F2, F3, F5, F8, Enter, Tab, etc.) apply to the focused radio only.
+
+### Visual TX Indicator
+
+Below the input fields on each radio, a TX indicator shows what is being transmitted:
+
+```
+│ Call: [W1ABC___]   Exch: [5NN 123_]             │
+│ TX: CQ TEST N▌                                  │
+```
+
+The text reveals character-by-character in sync with when each character would be heard over the air. This lets you track transmission progress without sidetone audio.
+
+### Latch Mode
+
+Latch mode is an optional feature (enable in Settings) that helps you focus on receiving while transmitting:
+
+- **When you start transmitting on one radio**: The *other* radio's audio is routed to both ears
+- **When transmission ends**: Audio returns to normal stereo mode
+
+This allows you to concentrate on copying the non-transmitting radio while your CQ or exchange is being sent.
+
+### Operating Tips
+
+1. **Start with stereo OFF**: When learning 2BSIQ, begin with stereo disabled so you can focus on one radio at a time. Toggle stereo on as you become comfortable.
+
+2. **Use latch mode**: Enable latch mode so you can always hear incoming stations on the idle radio while transmitting.
+
+3. **Practice radio switching**: Get comfortable with the Insert key for quick swaps. Ctrl+Arrow keys let you explicitly select a specific radio.
+
+4. **Watch the TX indicator**: Since there's no sidetone, rely on the visual TX indicator to know when your transmission will complete.
+
+5. **Build up gradually**: Start by completing one QSO at a time on each radio before attempting overlapping QSOs.
+
+---
+
 ## User Settings
 
 ### Your Callsign
@@ -72,6 +141,18 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Purpose**: Toggle visibility of the status indicator showing current contest state
 - **Default**: `true` (enabled)
 - **Values**: true/false
+
+### 2BSIQ Mode
+- **Purpose**: Enable two-radio simultaneous operation mode
+- **Default**: `false` (disabled)
+- **Values**: true/false
+- **Note**: See the [2BSIQ Mode](#2bsiq-mode-two-radio-operation) section for detailed usage
+
+### Latch Mode
+- **Purpose**: When transmitting on one radio, route the other radio's audio to both ears
+- **Default**: `false` (disabled)
+- **Values**: true/false
+- **Note**: Only applies when 2BSIQ Mode is enabled
 
 ---
 

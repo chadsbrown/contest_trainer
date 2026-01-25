@@ -121,8 +121,11 @@ impl AudioEngine {
                 };
 
                 // Send completion events
-                for station_id in completed_stations {
-                    let _ = event_tx.try_send(AudioEvent::StationComplete(station_id));
+                for (station_id, radio_index) in completed_stations {
+                    let _ = event_tx.try_send(AudioEvent::StationComplete {
+                        id: station_id,
+                        radio_index,
+                    });
                 }
                 if user_completed {
                     let _ = event_tx.try_send(AudioEvent::UserMessageComplete);
@@ -138,12 +141,12 @@ impl AudioEngine {
     }
 
     /// Get current TX progress for visual indicator
-    /// Returns (message, chars_sent) if user is transmitting, None otherwise
-    pub fn get_tx_progress(&self) -> Option<(String, usize)> {
+    /// Returns (message, chars_sent, radio_index) if user is transmitting, None otherwise
+    pub fn get_tx_progress(&self) -> Option<(String, usize, u8)> {
         let mixer = self.mixer.lock().unwrap();
         mixer
             .get_tx_progress()
-            .map(|(msg, chars)| (msg.to_string(), chars))
+            .map(|(msg, chars, radio)| (msg.to_string(), chars, radio))
     }
 
     /// Process pending commands (call this from the main thread periodically)
@@ -158,8 +161,12 @@ impl AudioEngine {
                             let message = params.callsign.clone();
                             mixer.add_station(&params, &message);
                         }
-                        AudioCommand::PlayUserMessage { message, wpm } => {
-                            mixer.play_user_message(&message, wpm);
+                        AudioCommand::PlayUserMessage {
+                            message,
+                            wpm,
+                            radio_index,
+                        } => {
+                            mixer.play_user_message(&message, wpm, radio_index);
                         }
                         AudioCommand::UpdateSettings(settings) => {
                             mixer.update_settings(settings);
@@ -175,6 +182,9 @@ impl AudioEngine {
                         }
                         AudioCommand::Update2BsiqMode { enabled } => {
                             mixer.update_2bsiq_mode(enabled);
+                        }
+                        AudioCommand::UpdateLatchMode { enabled } => {
+                            mixer.update_latch_mode(enabled);
                         }
                     }
                 }

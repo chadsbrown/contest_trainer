@@ -110,14 +110,19 @@ fn render_single_radio_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
 
 /// Render dual radio panels for 2BSIQ mode
 fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
-    // Get TX progress once (shared across radios for now - will track per-radio later)
+    // Get TX progress - now includes radio_index to show on correct radio
     let tx_progress = app.get_tx_progress();
 
+    // Determine which radio is transmitting (if any)
+    let tx_radio_index = tx_progress.as_ref().map(|(_, _, radio)| *radio);
+
     ui.horizontal(|ui| {
-        // Radio 1 panel (left)
+        // Radio 1 panel (left) - radio_index 0
         let r1_focused = app.focused_radio == RadioId::Radio1;
-        let r1_tx = if r1_focused {
-            tx_progress.as_ref()
+        let r1_tx = if tx_radio_index == Some(0) {
+            tx_progress
+                .as_ref()
+                .map(|(msg, chars, _)| (msg.clone(), *chars))
         } else {
             None
         };
@@ -129,17 +134,19 @@ fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
             app.settings.user.show_status_line,
             app.show_settings,
             &app.settings.contest.contest_type,
-            r1_tx,
+            r1_tx.as_ref(),
         );
 
         ui.add_space(16.0);
         ui.separator();
         ui.add_space(16.0);
 
-        // Radio 2 panel (right)
+        // Radio 2 panel (right) - radio_index 1
         let r2_focused = app.focused_radio == RadioId::Radio2;
-        let r2_tx = if r2_focused {
-            tx_progress.as_ref()
+        let r2_tx = if tx_radio_index == Some(1) {
+            tx_progress
+                .as_ref()
+                .map(|(msg, chars, _)| (msg.clone(), *chars))
         } else {
             None
         };
@@ -151,7 +158,7 @@ fn render_dual_radio_panels(ui: &mut egui::Ui, app: &mut ContestApp) {
             app.settings.user.show_status_line,
             app.show_settings,
             &app.settings.contest.contest_type,
-            r2_tx,
+            r2_tx.as_ref(),
         );
     });
 
@@ -300,6 +307,10 @@ fn render_2bsiq_key_hints(ui: &mut egui::Ui, stereo_enabled: bool, focused_radio
 
         ui.label(RichText::new("Ctrl+←/→").strong().monospace());
         ui.label("Focus");
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("Ctrl+F1/F3").strong().monospace());
+        ui.label("Alt CQ/TU");
         ui.add_space(16.0);
 
         // Status indicators

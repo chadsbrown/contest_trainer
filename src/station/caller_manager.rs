@@ -113,15 +113,7 @@ pub struct CallerManager {
 }
 
 impl CallerManager {
-    pub fn new(callsigns: CallsignPool, settings: SimulationSettings) -> Self {
-        Self::new_with_radio_index(callsigns, settings, 0)
-    }
-
-    pub fn new_with_radio_index(
-        callsigns: CallsignPool,
-        settings: SimulationSettings,
-        radio_index: u8,
-    ) -> Self {
+    pub fn new(callsigns: CallsignPool, settings: SimulationSettings, radio_index: u8) -> Self {
         let pileup_settings = settings.pileup.clone();
         Self {
             callsigns: CallsignSource::Regular(callsigns),
@@ -136,11 +128,7 @@ impl CallerManager {
         }
     }
 
-    pub fn new_cwt(callsigns: CwtCallsignPool, settings: SimulationSettings) -> Self {
-        Self::new_cwt_with_radio_index(callsigns, settings, 0)
-    }
-
-    pub fn new_cwt_with_radio_index(
+    pub fn new_cwt(
         callsigns: CwtCallsignPool,
         settings: SimulationSettings,
         radio_index: u8,
@@ -163,6 +151,12 @@ impl CallerManager {
     pub fn update_settings(&mut self, settings: SimulationSettings) {
         self.pileup_settings = settings.pileup.clone();
         self.settings = settings;
+    }
+
+    /// Clear all callers from queue (used when disabling 2BSIQ mode)
+    pub fn clear_all_callers(&mut self) {
+        self.queue.clear();
+        self.active_ids.clear();
     }
 
     /// Update callsign pool (regular)
