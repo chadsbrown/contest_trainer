@@ -1,4 +1,5 @@
-use crate::app::{ContestApp, ContestState, InputField, Score};
+use crate::app::{ContestApp, InputField, Score};
+use crate::state::StatusColor;
 use egui::{Color32, RichText, Vec2};
 
 pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
@@ -19,7 +20,7 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
 
     // Status indicator
     if app.settings.user.show_status_line {
-        render_status(ui, &app.state);
+        render_status(ui, app);
         ui.add_space(12.0);
     }
 
@@ -92,73 +93,19 @@ fn render_score_bar(ui: &mut egui::Ui, score: &Score, user_wpm: u8) {
     });
 }
 
-fn render_status(ui: &mut egui::Ui, state: &ContestState) {
-    let (status_text, status_color) = match state {
-        ContestState::Idle => ("Press F1/Enter to call CQ", Color32::GRAY),
-        ContestState::CallingCq => ("Calling CQ...", Color32::YELLOW),
-        ContestState::WaitingForCallers => ("Waiting for callers...", Color32::LIGHT_BLUE),
-        ContestState::StationsCalling { .. } => {
-            ("Station calling - enter callsign", Color32::GREEN)
-        }
-        ContestState::QueryingPartial { .. } => ("Querying partial...", Color32::YELLOW),
-        ContestState::WaitingForPartialResponse { .. } => {
-            ("Waiting for response...", Color32::LIGHT_BLUE)
-        }
-        ContestState::SendingExchange { .. } => ("Sending exchange...", Color32::YELLOW),
-        ContestState::WaitingToSendExchange { .. } => ("Sending exchange...", Color32::YELLOW),
-        ContestState::ReceivingExchange { .. } => {
-            ("Receiving exchange - type what you copy", Color32::GREEN)
-        }
-        ContestState::SendingAgn { .. } => ("Requesting repeat...", Color32::YELLOW),
-        ContestState::WaitingForAgn { .. } => ("Waiting for repeat...", Color32::LIGHT_BLUE),
-        ContestState::SendingCallsignAgn { .. } => ("Requesting repeat...", Color32::YELLOW),
-        ContestState::WaitingForCallsignAgn { .. } => {
-            ("Waiting for repeat...", Color32::LIGHT_BLUE)
-        }
-        ContestState::CallerRequestingAgn { .. } => {
-            ("Station requesting repeat...", Color32::YELLOW)
-        }
-        ContestState::WaitingForUserExchangeRepeat { .. } => {
-            ("Press F2 to resend exchange", Color32::GREEN)
-        }
-        ContestState::QsoComplete { .. } => (
-            "QSO logged! Press F1 for next CQ",
-            Color32::from_rgb(100, 200, 100),
-        ),
-        ContestState::WaitingForTailEnder { .. } => (
-            "QSO logged! Press F1 for next CQ",
-            Color32::from_rgb(100, 200, 100),
-        ),
-        ContestState::SendingCallCorrection { .. } => {
-            ("Station correcting callsign...", Color32::YELLOW)
-        }
-        ContestState::WaitingToSendCallCorrection { .. } => {
-            ("Station correcting callsign...", Color32::YELLOW)
-        }
-        ContestState::WaitingForCallCorrection { .. } => {
-            ("Correct callsign and resend", Color32::GREEN)
-        }
-        ContestState::SendingExchangeWillCorrect { .. } => ("Sending exchange...", Color32::YELLOW),
-        ContestState::SendingCallsignAgnFromCorrection { .. } => {
-            ("Requesting callsign repeat...", Color32::YELLOW)
-        }
-        ContestState::WaitingForCallsignAgnFromCorrection { .. } => {
-            ("Requesting callsign repeat...", Color32::YELLOW)
-        }
-        ContestState::SendingCorrectionRepeat { .. } => {
-            ("Station repeating callsign...", Color32::YELLOW)
-        }
-        ContestState::QueryingPartialFromCorrection { .. } => {
-            ("Querying partial...", Color32::YELLOW)
-        }
-        ContestState::WaitingForPartialResponseFromCorrection { .. } => {
-            ("Querying partial...", Color32::YELLOW)
-        }
+fn render_status(ui: &mut egui::Ui, app: &ContestApp) {
+    let (status_text, status_color) = app.get_status();
+    let color = match status_color {
+        StatusColor::Gray => Color32::GRAY,
+        StatusColor::Yellow => Color32::YELLOW,
+        StatusColor::LightBlue => Color32::LIGHT_BLUE,
+        StatusColor::Green => Color32::from_rgb(100, 200, 100),
+        StatusColor::Orange => Color32::from_rgb(255, 165, 0),
     };
 
     ui.horizontal(|ui| {
         ui.label(RichText::new("Status:").strong());
-        ui.label(RichText::new(status_text).color(status_color));
+        ui.label(RichText::new(status_text).color(color));
     });
 }
 

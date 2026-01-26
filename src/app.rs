@@ -8,8 +8,11 @@ use crate::config::AppSettings;
 use crate::contest::ContestType;
 use crate::contest::{self, Contest};
 use crate::cty::CtyDat;
-use crate::messages::{AudioCommand, AudioEvent, StationParams};
-use crate::station::{CallerManager, CallsignPool, CwtCallsignPool};
+use crate::messages::{
+    AudioCommand, AudioEvent, MessageSegment, MessageSegmentType, StationParams,
+};
+use crate::state::{ContestState, QsoContext, StationTxType, StatusColor, UserTxType};
+use crate::station::{CallerManager, CallerResponse, CallsignPool, CwtCallsignPool};
 use crate::stats::{QsoRecord, SessionStats};
 use crate::ui::{render_main_panel, render_settings_panel, render_stats_window, FileDialogTarget};
 
@@ -18,108 +21,6 @@ use crate::ui::{render_main_panel, render_settings_panel, render_stats_window, F
 pub enum InputField {
     Callsign,
     Exchange,
-}
-
-/// Current state of the contest session
-#[derive(Clone, Debug)]
-pub enum ContestState {
-    /// Idle - waiting for user to start
-    Idle,
-    /// User is sending CQ
-    CallingCq,
-    /// CQ finished, waiting for stations to call
-    WaitingForCallers,
-    /// Station(s) are calling
-    StationsCalling { callers: Vec<ActiveCaller> },
-    /// User sent partial callsign query, waiting for matching station to repeat
-    QueryingPartial { callers: Vec<ActiveCaller> },
-    /// Brief pause before station repeats callsign after partial query
-    WaitingForPartialResponse {
-        callers: Vec<ActiveCaller>,
-        wait_until: Instant,
-    },
-    /// User entered callsign, we're sending their exchange
-    SendingExchange { caller: ActiveCaller },
-    /// Brief pause before station sends their exchange
-    WaitingToSendExchange {
-        caller: ActiveCaller,
-        wait_until: Instant,
-    },
-    /// Station is sending their exchange
-    ReceivingExchange { caller: ActiveCaller },
-    /// User requested AGN, sending AGN message
-    SendingAgn { caller: ActiveCaller },
-    /// Waiting for station to resend exchange after AGN
-    WaitingForAgn {
-        caller: ActiveCaller,
-        wait_until: Instant,
-    },
-    /// User requested AGN for callsign (cursor in callsign field)
-    SendingCallsignAgn { callers: Vec<ActiveCaller> },
-    /// Waiting for station(s) to resend callsign after AGN
-    WaitingForCallsignAgn {
-        callers: Vec<ActiveCaller>,
-        wait_until: Instant,
-    },
-    /// Caller is requesting AGN (sending "AGN" or "?")
-    CallerRequestingAgn { caller: ActiveCaller },
-    /// Waiting for user to resend exchange after caller requested AGN
-    WaitingForUserExchangeRepeat { caller: ActiveCaller },
-    /// QSO complete, showing result
-    QsoComplete,
-    /// Brief pause before tail-ender starts calling
-    WaitingForTailEnder {
-        callers: Vec<ActiveCaller>,
-        wait_until: Instant,
-    },
-    /// Station is sending callsign correction (user had wrong call)
-    SendingCallCorrection {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-    },
-    /// Brief pause before station sends call correction
-    WaitingToSendCallCorrection {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-        wait_until: Instant,
-    },
-    /// Waiting for user to correct callsign and resend exchange
-    WaitingForCallCorrection {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-    },
-    /// User is sending exchange but callsign was wrong - will trigger correction
-    SendingExchangeWillCorrect {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-    },
-    /// User requested callsign repeat (F8) while in call correction flow
-    SendingCallsignAgnFromCorrection {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-    },
-    /// Waiting for station to repeat callsign during call correction flow
-    WaitingForCallsignAgnFromCorrection {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-        wait_until: Instant,
-    },
-    /// Station is repeating callsign after user requested repeat during correction
-    SendingCorrectionRepeat {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-    },
-    /// User sent partial query (F5) while in call correction flow
-    QueryingPartialFromCorrection {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-    },
-    /// Waiting for station to respond to partial query during call correction flow
-    WaitingForPartialResponseFromCorrection {
-        caller: ActiveCaller,
-        correction_attempts: u8,
-        wait_until: Instant,
-    },
 }
 
 #[derive(Clone, Debug)]
@@ -167,6 +68,7 @@ impl Score {
 pub struct ContestApp {
     pub settings: AppSettings,
     pub state: ContestState,
+    pub context: QsoContext,
     pub score: Score,
     pub callsign_input: String,
     pub exchange_input: String,
@@ -251,6 +153,7 @@ impl ContestApp {
         Self {
             settings,
             state: ContestState::Idle,
+            context: QsoContext::new(),
             score: Score::default(),
             callsign_input: String::new(),
             exchange_input: String::new(),
@@ -304,6 +207,11 @@ impl ContestApp {
             .send(AudioCommand::UpdateSettings(self.settings.audio.clone()));
     }
 
+    /// Get the status text and color for UI display
+    pub fn get_status(&self) -> (&'static str, StatusColor) {
+        self.state.status_text(&self.context)
+    }
+
     fn send_cq(&mut self) {
         let cq_prefix = self.settings.contest.cq_message.trim();
         let callsign = self.settings.user.callsign.trim();
@@ -319,6 +227,9 @@ impl ContestApp {
         // Reset AGN tracking for new QSO
         self.used_agn_callsign = false;
         self.used_agn_exchange = false;
+
+        // Reset context for new QSO
+        self.context.reset();
     }
 
     fn send_exchange(&mut self, their_call: &str) {
@@ -330,12 +241,24 @@ impl ContestApp {
             &self.settings.user.name,
         );
 
-        let message = format!("{} {}", their_call, exchange);
         let wpm = self.settings.user.wpm;
+
+        // Use segmented message for element-level tracking
+        // Word gap is automatically added between segments by SegmentedUserStation
+        let segments = vec![
+            MessageSegment {
+                content: their_call.to_string(),
+                segment_type: MessageSegmentType::TheirCallsign,
+            },
+            MessageSegment {
+                content: exchange,
+                segment_type: MessageSegmentType::OurExchange,
+            },
+        ];
 
         let _ = self
             .cmd_tx
-            .send(AudioCommand::PlayUserMessage { message, wpm });
+            .send(AudioCommand::PlayUserMessageSegmented { segments, wpm });
     }
 
     fn send_exchange_only(&mut self) {
@@ -349,10 +272,15 @@ impl ContestApp {
 
         let wpm = self.settings.user.wpm;
 
-        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
-            message: exchange,
-            wpm,
-        });
+        // Use segmented message for element-level tracking
+        let segments = vec![MessageSegment {
+            content: exchange,
+            segment_type: MessageSegmentType::OurExchange,
+        }];
+
+        let _ = self
+            .cmd_tx
+            .send(AudioCommand::PlayUserMessageSegmented { segments, wpm });
     }
 
     fn send_tu(&mut self) {
@@ -364,24 +292,31 @@ impl ContestApp {
             .send(AudioCommand::PlayUserMessage { message, wpm });
     }
 
-    fn send_partial_query(&mut self, partial: &str) {
-        // Send just the partial callsign (his call)
+    fn send_his_call(&mut self) {
+        let their_call = self.callsign_input.trim().to_uppercase();
+        if their_call.is_empty() {
+            return;
+        }
+
         let wpm = self.settings.user.wpm;
 
-        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
-            message: partial.to_string(),
-            wpm,
-        });
+        // Use segmented message for element-level tracking
+        let segments = vec![MessageSegment {
+            content: their_call,
+            segment_type: MessageSegmentType::TheirCallsign,
+        }];
+
+        let _ = self
+            .cmd_tx
+            .send(AudioCommand::PlayUserMessageSegmented { segments, wpm });
     }
 
     /// Calculate similarity between two strings (0.0 to 1.0)
-    /// Uses longest common subsequence ratio
     fn callsign_similarity(a: &str, b: &str) -> f32 {
         if a.is_empty() || b.is_empty() {
             return 0.0;
         }
 
-        // Count matching characters in sequence
         let a_chars: Vec<char> = a.chars().collect();
         let b_chars: Vec<char> = b.chars().collect();
 
@@ -397,7 +332,6 @@ impl ContestApp {
             }
         }
 
-        // Also check if one contains the other as substring
         if a.contains(b) || b.contains(a) {
             let shorter = a.len().min(b.len()) as f32;
             let longer = a.len().max(b.len()) as f32;
@@ -408,7 +342,6 @@ impl ContestApp {
     }
 
     /// Find the most similar caller to the entered text
-    /// Returns None if no caller is similar enough (threshold: 0.4)
     fn find_similar_caller<'a>(
         entered: &str,
         callers: &'a [ActiveCaller],
@@ -423,47 +356,80 @@ impl ContestApp {
             .map(|(caller, _)| caller)
     }
 
-    fn handle_partial_query(&mut self) {
-        let partial = self.callsign_input.trim().to_uppercase();
-        if partial.is_empty() {
+    /// F5 - Send his call (callsign field contents only)
+    /// Available in any state with an active caller
+    fn handle_f5_his_call(&mut self) {
+        let entered_call = self.callsign_input.trim().to_uppercase();
+        if entered_call.is_empty() {
             return;
         }
 
-        // Works when stations are calling OR when waiting for call correction
-        let (callers, correction_context) = match &self.state {
-            ContestState::StationsCalling { callers } => (callers.clone(), None),
-            ContestState::WaitingForCallCorrection {
-                caller,
-                correction_attempts,
-            } => (vec![caller.clone()], Some(*correction_attempts)),
-            _ => return,
-        };
-
-        // Send the partial query
-        self.send_partial_query(&partial);
-
-        // Transition to appropriate state based on context
-        if let Some(correction_attempts) = correction_context {
-            // In correction context, always use the single caller (no matching needed)
-            if let Some(caller) = callers.into_iter().next() {
-                self.state = ContestState::QueryingPartialFromCorrection {
-                    caller,
-                    correction_attempts,
-                };
-            }
-        } else {
-            // Normal flow - find the most similar caller
-            let matching_caller = Self::find_similar_caller(&partial, &callers);
-            let matching: Vec<ActiveCaller> = matching_caller.into_iter().cloned().collect();
-            self.state = ContestState::QueryingPartial { callers: matching };
+        // Need at least one active caller
+        if self.context.active_callers.is_empty() {
+            return;
         }
+
+        // Stop any current audio
+        let _ = self.cmd_tx.send(AudioCommand::StopAll);
+
+        // Find matching caller and select them (clone to avoid borrow issues)
+        let matching_caller =
+            Self::find_similar_caller(&entered_call, &self.context.active_callers).cloned();
+        if let Some(caller) = matching_caller {
+            // If multiple callers, narrow down to just this one
+            let multiple_callers = self.context.active_callers.len() > 1;
+            self.context.select_caller(caller.clone());
+            if multiple_callers {
+                self.context.set_callers(vec![caller]);
+            }
+        }
+
+        // Send his call
+        self.send_his_call();
+
+        // Mark that we expect the caller to repeat their callsign
+        self.context.expecting_callsign_repeat = true;
+
+        self.state = ContestState::UserTransmitting {
+            tx_type: UserTxType::CallsignOnly,
+        };
+    }
+
+    /// F2 - Send exchange only
+    /// Available in any state with an active caller
+    fn handle_f2_exchange(&mut self) {
+        // Need at least one active caller
+        if self.context.active_callers.is_empty() {
+            return;
+        }
+
+        // Stop any current audio
+        let _ = self.cmd_tx.send(AudioCommand::StopAll);
+
+        // If we have an entered callsign, try to select a matching caller (clone to avoid borrow issues)
+        let entered_call = self.callsign_input.trim().to_uppercase();
+        if !entered_call.is_empty() {
+            let matching_caller =
+                Self::find_similar_caller(&entered_call, &self.context.active_callers).cloned();
+            if let Some(caller) = matching_caller {
+                // If multiple callers, narrow down to just this one
+                let multiple_callers = self.context.active_callers.len() > 1;
+                self.context.select_caller(caller.clone());
+                if multiple_callers {
+                    self.context.set_callers(vec![caller]);
+                }
+            }
+        }
+
+        // Send exchange only
+        self.send_exchange_only();
+
+        self.state = ContestState::UserTransmitting {
+            tx_type: UserTxType::ExchangeOnly,
+        };
     }
 
     fn handle_callsign_submit(&mut self) {
-        self.handle_callsign_submit_internal(0);
-    }
-
-    fn handle_callsign_submit_internal(&mut self, correction_attempts: u8) {
         use rand::Rng;
 
         let entered_call = self.callsign_input.trim().to_uppercase();
@@ -471,84 +437,52 @@ impl ContestApp {
             return;
         }
 
-        if let ContestState::StationsCalling { ref callers } = self.state {
-            // Find the most similar caller, or fall back to first caller if none match
-            let caller = Self::find_similar_caller(&entered_call, callers)
-                .or_else(|| callers.first())
-                .cloned();
+        // Only works when stations are calling
+        if self.state != ContestState::StationsCalling {
+            return;
+        }
 
-            if let Some(caller) = caller {
-                // Check if the entered callsign is correct
-                let is_exact_match = entered_call == caller.params.callsign;
+        // User has entered a callsign, so they've "received" it
+        self.context.progress.received_their_call = true;
 
-                if is_exact_match {
-                    // Correct callsign - proceed normally
-                    self.send_exchange(&entered_call);
-                    self.state = ContestState::SendingExchange { caller };
-                    self.current_field = InputField::Exchange;
-                } else {
-                    // Incorrect callsign - check if caller will correct
-                    let mut rng = rand::thread_rng();
-                    let settings = &self.settings.simulation.call_correction;
+        // Find the most similar caller, or fall back to first caller if none match
+        let caller = Self::find_similar_caller(&entered_call, &self.context.active_callers)
+            .or_else(|| self.context.active_callers.first())
+            .cloned();
 
-                    let should_correct = rng.gen::<f32>() < settings.correction_probability
-                        && correction_attempts < settings.max_correction_attempts;
+        if let Some(caller) = caller {
+            // Select this caller as the current one
+            self.context.select_caller(caller.clone());
 
-                    if should_correct {
-                        // Caller will correct - send our exchange first, then they'll correct
-                        self.send_exchange(&entered_call);
-
-                        self.state = ContestState::SendingExchangeWillCorrect {
-                            caller,
-                            correction_attempts: correction_attempts + 1,
-                        };
-                        self.current_field = InputField::Exchange;
-                    } else {
-                        // Caller won't correct - proceed normally (user will get penalty)
-                        self.send_exchange(&entered_call);
-                        self.state = ContestState::SendingExchange { caller };
-                        self.current_field = InputField::Exchange;
-                    }
-                }
-            }
-            // If no similar caller found, do nothing - user should press F1 to CQ again
-        } else if let ContestState::WaitingForCallCorrection {
-            ref caller,
-            correction_attempts: attempts,
-        } = self.state
-        {
-            // User is retrying after a correction
-            let caller = caller.clone();
+            // Check if the entered callsign is correct
             let is_exact_match = entered_call == caller.params.callsign;
 
             if is_exact_match {
-                // Now correct - proceed normally
-                self.send_exchange(&entered_call);
-                self.state = ContestState::SendingExchange { caller };
-                self.current_field = InputField::Exchange;
+                // Correct callsign - clear any correction state
+                self.context.end_correction();
             } else {
-                // Still wrong - check if caller will try again
+                // Incorrect callsign - check if caller will correct
                 let mut rng = rand::thread_rng();
                 let settings = &self.settings.simulation.call_correction;
 
-                let should_correct_again = rng.gen::<f32>() < settings.correction_probability
-                    && attempts < settings.max_correction_attempts;
+                let should_correct = rng.gen::<f32>() < settings.correction_probability
+                    && self.context.correction_attempts < settings.max_correction_attempts;
 
-                if should_correct_again {
-                    self.send_exchange(&entered_call);
-
-                    self.state = ContestState::SendingExchangeWillCorrect {
-                        caller,
-                        correction_attempts: attempts + 1,
-                    };
-                    self.current_field = InputField::Exchange;
+                if should_correct {
+                    self.context.correction_in_progress = true;
+                    self.context.increment_correction_attempt();
                 } else {
-                    // Caller gives up correcting - proceed with wrong call
-                    self.send_exchange(&entered_call);
-                    self.state = ContestState::SendingExchange { caller };
-                    self.current_field = InputField::Exchange;
+                    // Caller won't correct anymore - clear correction state
+                    self.context.end_correction();
                 }
             }
+
+            // Send our exchange
+            self.send_exchange(&entered_call);
+            self.state = ContestState::UserTransmitting {
+                tx_type: UserTxType::Exchange,
+            };
+            self.current_field = InputField::Exchange;
         }
     }
 
@@ -556,29 +490,39 @@ impl ContestApp {
         let entered_exchange = self.exchange_input.trim().to_uppercase();
         let entered_callsign = self.callsign_input.trim().to_uppercase();
 
+        // User has entered an exchange, so they've "received" it
+        if !entered_exchange.is_empty() {
+            self.context.progress.received_their_exchange = true;
+        }
+
         // Get the expected caller info
-        let (expected_call, expected_exchange_obj, station_wpm, station_id) = match &self.state {
-            ContestState::ReceivingExchange { caller } => (
-                caller.params.callsign.clone(),
-                caller.params.exchange.clone(),
-                caller.params.wpm,
-                caller.params.id,
-            ),
-            _ => return,
+        let caller = match self.context.get_current_caller() {
+            Some(c) => c.clone(),
+            None => return,
         };
 
+        // Must be receiving exchange
+        if !matches!(
+            self.state,
+            ContestState::StationTransmitting {
+                tx_type: StationTxType::SendingExchange
+            }
+        ) {
+            return;
+        }
+
         // Validate the entry
-        let expected_exchange_str = self.contest.format_sent_exchange(&expected_exchange_obj);
+        let expected_exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
         let validation = self.contest.validate(
-            &expected_call,
-            &expected_exchange_obj,
+            &caller.params.callsign,
+            &caller.params.exchange,
             &entered_callsign,
             &entered_exchange,
         );
 
         let result = QsoResult {
             callsign: entered_callsign.clone(),
-            expected_call: expected_call.clone(),
+            expected_call: caller.params.callsign.clone(),
             expected_exchange: expected_exchange_str.clone(),
             callsign_correct: validation.callsign_correct,
             exchange_correct: validation.exchange_correct,
@@ -587,13 +531,13 @@ impl ContestApp {
 
         // Log QSO to session stats
         self.session_stats.log_qso(QsoRecord {
-            expected_callsign: expected_call.clone(),
+            expected_callsign: caller.params.callsign.clone(),
             entered_callsign,
             callsign_correct: validation.callsign_correct,
             expected_exchange: expected_exchange_str,
             entered_exchange,
             exchange_correct: validation.exchange_correct,
-            station_wpm,
+            station_wpm: caller.params.wpm,
             points: validation.points,
             used_agn_callsign: self.used_agn_callsign,
             used_agn_exchange: self.used_agn_exchange,
@@ -604,7 +548,7 @@ impl ContestApp {
         self.user_serial += 1;
 
         // Mark caller as worked in the caller manager
-        self.caller_manager.on_qso_complete(station_id);
+        self.caller_manager.on_qso_complete(caller.params.id);
 
         // Send TU
         self.send_tu();
@@ -612,18 +556,23 @@ impl ContestApp {
         self.last_qso_result = Some(result);
         self.state = ContestState::QsoComplete;
 
-        // Clear inputs
+        // Clear inputs and reset correction state
         self.callsign_input.clear();
         self.exchange_input.clear();
         self.current_field = InputField::Callsign;
+        self.context.end_correction();
     }
 
     fn handle_agn_request(&mut self) {
         // Only works when receiving exchange
-        let caller = match &self.state {
-            ContestState::ReceivingExchange { caller } => caller.clone(),
-            _ => return,
-        };
+        if !matches!(
+            self.state,
+            ContestState::StationTransmitting {
+                tx_type: StationTxType::SendingExchange
+            }
+        ) {
+            return;
+        }
 
         // Stop any current station audio
         let _ = self.cmd_tx.send(AudioCommand::StopAll);
@@ -635,20 +584,17 @@ impl ContestApp {
             wpm: self.settings.user.wpm,
         });
 
-        self.state = ContestState::SendingAgn { caller };
+        self.state = ContestState::UserTransmitting {
+            tx_type: UserTxType::Agn,
+        };
         self.used_agn_exchange = true;
     }
 
     fn handle_callsign_agn_request(&mut self) {
-        // Works when stations are calling OR when waiting for call correction
-        let (callers, correction_context) = match &self.state {
-            ContestState::StationsCalling { callers } => (callers.clone(), None),
-            ContestState::WaitingForCallCorrection {
-                caller,
-                correction_attempts,
-            } => (vec![caller.clone()], Some(*correction_attempts)),
-            _ => return,
-        };
+        // Works when stations are calling
+        if self.state != ContestState::StationsCalling {
+            return;
+        }
 
         // Stop any current station audio
         let _ = self.cmd_tx.send(AudioCommand::StopAll);
@@ -660,17 +606,12 @@ impl ContestApp {
             wpm: self.settings.user.wpm,
         });
 
-        // Transition to appropriate state based on context
-        if let Some(correction_attempts) = correction_context {
-            if let Some(caller) = callers.into_iter().next() {
-                self.state = ContestState::SendingCallsignAgnFromCorrection {
-                    caller,
-                    correction_attempts,
-                };
-            }
-        } else {
-            self.state = ContestState::SendingCallsignAgn { callers };
-        }
+        // Mark that we expect the caller to repeat their callsign
+        self.context.expecting_callsign_repeat = true;
+
+        self.state = ContestState::UserTransmitting {
+            tx_type: UserTxType::Agn,
+        };
         self.used_agn_callsign = true;
     }
 
@@ -679,148 +620,101 @@ impl ContestApp {
             match event {
                 AudioEvent::StationComplete(id) => {
                     self.caller_manager.station_audio_complete(id);
-
-                    // If we were waiting for their exchange, move to logging
-                    if let ContestState::ReceivingExchange { ref caller } = self.state {
-                        if caller.params.id == id {
-                            // Exchange received, user can now log
-                        }
-                    }
-
-                    // If caller was requesting AGN, transition to waiting for user to resend
-                    if let ContestState::CallerRequestingAgn { ref caller } = self.state {
-                        if caller.params.id == id {
-                            let caller = caller.clone();
-                            self.state = ContestState::WaitingForUserExchangeRepeat { caller };
-                        }
-                    }
-
-                    // If station finished sending call correction
-                    if let ContestState::SendingCallCorrection {
-                        ref caller,
-                        correction_attempts,
-                    } = self.state
-                    {
-                        if caller.params.id == id {
-                            let caller = caller.clone();
-                            // Wait for user to correct callsign and resend
-                            self.state = ContestState::WaitingForCallCorrection {
-                                caller,
-                                correction_attempts,
-                            };
-                        }
-                    }
-
-                    // If station finished repeating callsign (after F8/F5 during correction flow)
-                    if let ContestState::SendingCorrectionRepeat {
-                        ref caller,
-                        correction_attempts,
-                    } = self.state
-                    {
-                        if caller.params.id == id {
-                            let caller = caller.clone();
-                            // Return to waiting for user to correct callsign
-                            self.state = ContestState::WaitingForCallCorrection {
-                                caller,
-                                correction_attempts,
-                            };
-                        }
-                    }
+                    self.on_station_audio_complete(id);
                 }
                 AudioEvent::UserMessageComplete => {
-                    match &self.state {
-                        ContestState::CallingCq => {
-                            // CQ finished, wait for callers
-                            self.state = ContestState::WaitingForCallers;
-                            self.last_cq_finished = Some(Instant::now());
+                    self.on_user_message_complete();
+                }
+                AudioEvent::UserSegmentComplete(segment_type) => {
+                    // Update QsoProgress based on which segment completed
+                    match segment_type {
+                        MessageSegmentType::TheirCallsign => {
+                            self.context.progress.sent_their_call = true;
                         }
-                        ContestState::SendingExchange { caller } => {
-                            // Our exchange sent, wait briefly before station responds
-                            let caller = caller.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingToSendExchange { caller, wait_until };
+                        MessageSegmentType::OurExchange => {
+                            self.context.progress.sent_our_exchange = true;
                         }
-                        ContestState::QsoComplete => {
-                            // TU finished - maybe a tail-ender jumps in
-                            self.try_spawn_tail_ender();
-                        }
-                        ContestState::QueryingPartial { callers } => {
-                            // Partial query sent, wait briefly before station repeats
-                            let callers = callers.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForPartialResponse {
-                                callers,
-                                wait_until,
-                            };
-                        }
-                        ContestState::SendingAgn { caller } => {
-                            // AGN request sent, wait briefly before station resends exchange
-                            let caller = caller.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForAgn { caller, wait_until };
-                        }
-                        ContestState::SendingCallsignAgn { callers } => {
-                            // AGN request sent, wait briefly before station(s) resend callsign
-                            let callers = callers.clone();
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForCallsignAgn {
-                                callers,
-                                wait_until,
-                            };
-                        }
-                        ContestState::SendingExchangeWillCorrect {
-                            caller,
-                            correction_attempts,
-                        } => {
-                            // User's exchange finished, now wait briefly before caller corrects
-                            let caller = caller.clone();
-                            let correction_attempts = *correction_attempts;
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingToSendCallCorrection {
-                                caller,
-                                correction_attempts,
-                                wait_until,
-                            };
-                        }
-                        ContestState::SendingCallsignAgnFromCorrection {
-                            caller,
-                            correction_attempts,
-                        } => {
-                            // AGN request sent during correction flow, wait briefly before station repeats
-                            let caller = caller.clone();
-                            let correction_attempts = *correction_attempts;
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForCallsignAgnFromCorrection {
-                                caller,
-                                correction_attempts,
-                                wait_until,
-                            };
-                        }
-                        ContestState::QueryingPartialFromCorrection {
-                            caller,
-                            correction_attempts,
-                        } => {
-                            // Partial query sent during correction flow, wait briefly before station responds
-                            let caller = caller.clone();
-                            let correction_attempts = *correction_attempts;
-                            let wait_until = Instant::now() + std::time::Duration::from_millis(250);
-                            self.state = ContestState::WaitingForPartialResponseFromCorrection {
-                                caller,
-                                correction_attempts,
-                                wait_until,
-                            };
-                        }
-                        _ => {}
+                        MessageSegmentType::Cq
+                        | MessageSegmentType::Tu
+                        | MessageSegmentType::Agn => {}
                     }
                 }
             }
         }
     }
 
-    /// Try to spawn a tail-ender after TU - a station that calls immediately
-    /// without waiting for another CQ
+    fn on_station_audio_complete(&mut self, _id: crate::messages::StationId) {
+        match self.state {
+            ContestState::StationTransmitting { tx_type } => {
+                match tx_type {
+                    StationTxType::RequestingAgn => {
+                        // Caller finished requesting AGN, wait for user to resend
+                        self.state = ContestState::StationsCalling;
+                    }
+                    StationTxType::Correction => {
+                        // Caller finished sending correction, wait for user to fix
+                        self.state = ContestState::StationsCalling;
+                    }
+                    StationTxType::SendingExchange => {
+                        // Exchange received, stay in this state for user to log
+                    }
+                    StationTxType::CallingUs => {
+                        // Station finished calling, transition to StationsCalling
+                        self.state = ContestState::StationsCalling;
+                    }
+                }
+            }
+            ContestState::StationsCalling => {
+                // Station audio complete while in StationsCalling - stay there
+            }
+            _ => {}
+        }
+    }
+
+    fn on_user_message_complete(&mut self) {
+        match self.state {
+            ContestState::CallingCq => {
+                // CQ finished, wait for callers
+                self.state = ContestState::WaitingForCallers;
+                self.last_cq_finished = Some(Instant::now());
+            }
+            ContestState::UserTransmitting { tx_type } => {
+                match tx_type {
+                    UserTxType::Cq => {
+                        self.state = ContestState::WaitingForCallers;
+                        self.last_cq_finished = Some(Instant::now());
+                    }
+                    UserTxType::Exchange | UserTxType::ExchangeOnly => {
+                        // Exchange sent, wait for station response
+                        self.context.set_wait(250);
+                        self.state = ContestState::WaitingForStation;
+                    }
+                    UserTxType::CallsignOnly => {
+                        // Partial query sent, wait for station response
+                        self.context.set_wait(250);
+                        self.state = ContestState::WaitingForStation;
+                    }
+                    UserTxType::Agn => {
+                        // AGN request sent, wait for station response
+                        self.context.set_wait(250);
+                        self.state = ContestState::WaitingForStation;
+                    }
+                    UserTxType::Tu => {
+                        // TU sent, check for tail-ender
+                        self.try_spawn_tail_ender();
+                    }
+                }
+            }
+            ContestState::QsoComplete => {
+                // TU finished - maybe a tail-ender jumps in
+                self.try_spawn_tail_ender();
+            }
+            _ => {}
+        }
+    }
+
+    /// Try to spawn a tail-ender after TU
     fn try_spawn_tail_ender(&mut self) {
-        // Try to get a tail-ender from the caller manager
         let tail_ender = self.caller_manager.try_spawn_tail_ender(
             self.contest.as_ref(),
             Some(&self.settings.user.callsign),
@@ -828,7 +722,6 @@ impl ContestApp {
         );
 
         let Some(params) = tail_ender else {
-            // No tail-ender, go to idle
             self.state = ContestState::Idle;
             return;
         };
@@ -836,182 +729,111 @@ impl ContestApp {
         // Prepare the tail-ender
         let callers = vec![ActiveCaller { params }];
 
-        // Reset AGN tracking for new QSO (this is a new QSO without F1/CQ)
+        // Reset for new QSO
         self.used_agn_callsign = false;
         self.used_agn_exchange = false;
+        self.context.reset();
+        self.context.set_callers(callers);
 
-        // Wait 100ms before the tail-ender starts calling
-        let wait_until = Instant::now() + std::time::Duration::from_millis(100);
-        self.state = ContestState::WaitingForTailEnder {
-            callers,
-            wait_until,
-        };
+        // Wait briefly before tail-ender starts calling
+        self.context.set_wait(100);
+        self.state = ContestState::WaitingForTailEnder;
     }
 
-    fn check_waiting_for_tail_ender(&mut self) {
-        if let ContestState::WaitingForTailEnder {
-            callers,
-            wait_until,
-        } = &self.state
-        {
-            if Instant::now() >= *wait_until {
-                let callers = callers.clone();
+    /// Check and handle waiting states
+    fn check_waiting_states(&mut self) {
+        if !self.context.wait_elapsed() {
+            return;
+        }
 
-                // Now start the audio for the tail-ender(s)
-                for caller in &callers {
+        match self.state {
+            ContestState::WaitingForStation => {
+                self.handle_station_response();
+            }
+            ContestState::WaitingForTailEnder => {
+                // Start tail-ender audio
+                for caller in &self.context.active_callers {
                     let _ = self
                         .cmd_tx
                         .send(AudioCommand::StartStation(caller.params.clone()));
                 }
-
-                self.state = ContestState::StationsCalling { callers };
+                self.state = ContestState::StationsCalling;
             }
+            _ => {}
         }
     }
 
-    fn check_waiting_to_send_exchange(&mut self) {
+    /// Handle station response based on QsoProgress
+    fn handle_station_response(&mut self) {
         use rand::Rng;
 
-        if let ContestState::WaitingToSendExchange { caller, wait_until } = &self.state {
-            if Instant::now() >= *wait_until {
-                let caller = caller.clone();
+        let caller = match self.context.get_current_caller() {
+            Some(c) => c.clone(),
+            None => {
+                // No current caller - have active callers resend their callsign
+                for caller in &self.context.active_callers {
+                    let _ = self
+                        .cmd_tx
+                        .send(AudioCommand::StartStation(caller.params.clone()));
+                }
+                self.state = ContestState::StationsCalling;
+                return;
+            }
+        };
 
-                // Randomly decide if the caller will request AGN
+        // If we're expecting a callsign repeat (after partial query or F8), just send callsign
+        if self.context.expecting_callsign_repeat {
+            self.context.expecting_callsign_repeat = false;
+
+            let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                id: caller.params.id,
+                callsign: caller.params.callsign.clone(),
+                exchange: caller.params.exchange.clone(),
+                frequency_offset_hz: caller.params.frequency_offset_hz,
+                wpm: caller.params.wpm,
+                amplitude: caller.params.amplitude,
+            }));
+
+            self.state = ContestState::StationsCalling;
+            return;
+        }
+
+        // If we're in correction mode, send the correction
+        if self.context.correction_in_progress {
+            let mut rng = rand::thread_rng();
+            // Send callsign once (75%) or twice (25%) for emphasis
+            let message = if rng.gen::<f32>() < 0.75 {
+                caller.params.callsign.clone()
+            } else {
+                format!("{} {}", caller.params.callsign, caller.params.callsign)
+            };
+
+            let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                id: caller.params.id,
+                callsign: message,
+                exchange: caller.params.exchange.clone(),
+                frequency_offset_hz: caller.params.frequency_offset_hz,
+                wpm: caller.params.wpm,
+                amplitude: caller.params.amplitude,
+            }));
+
+            self.state = ContestState::StationTransmitting {
+                tx_type: StationTxType::Correction,
+            };
+            return;
+        }
+
+        // Determine caller response based on what they've heard
+        let response = CallerResponse::from_progress(&self.context.progress);
+
+        match response {
+            CallerResponse::Confused => {
+                // Caller didn't hear their callsign - resend it or send "?"
                 let mut rng = rand::thread_rng();
-                if rng.gen::<f32>() < self.settings.simulation.agn_request_probability {
-                    // Caller requests AGN - send "AGN" or "?"
-                    let agn_message = if rng.gen::<bool>() { "AGN" } else { "?" };
-
-                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                        id: caller.params.id,
-                        callsign: agn_message.to_string(),
-                        exchange: caller.params.exchange.clone(),
-                        frequency_offset_hz: caller.params.frequency_offset_hz,
-                        wpm: caller.params.wpm,
-                        amplitude: caller.params.amplitude,
-                    }));
-
-                    self.state = ContestState::CallerRequestingAgn { caller };
-                } else {
-                    // Normal flow - have the station send only their exchange (not callsign again)
-                    let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
-
-                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                        id: caller.params.id,
-                        callsign: exchange_str,
-                        exchange: caller.params.exchange.clone(),
-                        frequency_offset_hz: caller.params.frequency_offset_hz,
-                        wpm: caller.params.wpm,
-                        amplitude: caller.params.amplitude,
-                    }));
-
-                    self.state = ContestState::ReceivingExchange { caller };
-                }
-            }
-        }
-    }
-
-    fn check_waiting_for_agn(&mut self) {
-        if let ContestState::WaitingForAgn { caller, wait_until } = &self.state {
-            if Instant::now() >= *wait_until {
-                let caller = caller.clone();
-
-                // Have the station resend their exchange
-                let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
-
-                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                    id: caller.params.id,
-                    callsign: exchange_str,
-                    exchange: caller.params.exchange.clone(),
-                    frequency_offset_hz: caller.params.frequency_offset_hz,
-                    wpm: caller.params.wpm,
-                    amplitude: caller.params.amplitude,
-                }));
-
-                self.state = ContestState::ReceivingExchange { caller };
-            }
-        }
-    }
-
-    fn check_waiting_for_callsign_agn(&mut self) {
-        if let ContestState::WaitingForCallsignAgn {
-            callers,
-            wait_until,
-        } = &self.state
-        {
-            if Instant::now() >= *wait_until {
-                let callers = callers.clone();
-
-                // Have station(s) resend their callsign
-                for caller in &callers {
-                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                        id: caller.params.id,
-                        callsign: caller.params.callsign.clone(),
-                        exchange: caller.params.exchange.clone(),
-                        frequency_offset_hz: caller.params.frequency_offset_hz,
-                        wpm: caller.params.wpm,
-                        amplitude: caller.params.amplitude,
-                    }));
-                }
-
-                // Go back to StationsCalling
-                self.state = ContestState::StationsCalling { callers };
-            }
-        }
-    }
-
-    fn check_waiting_for_partial_response(&mut self) {
-        if let ContestState::WaitingForPartialResponse {
-            callers,
-            wait_until,
-        } = &self.state
-        {
-            if Instant::now() >= *wait_until {
-                let callers = callers.clone();
-
-                if callers.is_empty() {
-                    // No matching callers - no response, go back to waiting for callers
-                    self.state = ContestState::WaitingForCallers;
-                    self.last_cq_finished = Some(Instant::now());
-                } else {
-                    // Station(s) repeat their callsign
-                    for caller in &callers {
-                        let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                            id: caller.params.id,
-                            callsign: caller.params.callsign.clone(),
-                            exchange: caller.params.exchange.clone(),
-                            frequency_offset_hz: caller.params.frequency_offset_hz,
-                            wpm: caller.params.wpm,
-                            amplitude: caller.params.amplitude,
-                        }));
-                    }
-
-                    // Go back to StationsCalling with only the matching callers
-                    self.state = ContestState::StationsCalling { callers };
-                }
-            }
-        }
-    }
-
-    fn check_waiting_to_send_call_correction(&mut self) {
-        use rand::Rng;
-
-        if let ContestState::WaitingToSendCallCorrection {
-            caller,
-            correction_attempts,
-            wait_until,
-        } = &self.state
-        {
-            if Instant::now() >= *wait_until {
-                let caller = caller.clone();
-                let correction_attempts = *correction_attempts;
-                let mut rng = rand::thread_rng();
-
-                // Send callsign once (75%) or twice (25%) for emphasis
-                let message = if rng.gen::<f32>() < 0.75 {
+                let message = if rng.gen::<bool>() {
                     caller.params.callsign.clone()
                 } else {
-                    format!("{} {}", caller.params.callsign, caller.params.callsign)
+                    "?".to_string()
                 };
 
                 let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
@@ -1023,76 +845,69 @@ impl ContestApp {
                     amplitude: caller.params.amplitude,
                 }));
 
-                self.state = ContestState::SendingCallCorrection {
-                    caller,
-                    correction_attempts,
-                };
+                self.state = ContestState::StationsCalling;
             }
-        }
-    }
+            CallerResponse::RequestAgn => {
+                // Caller heard their call but not our exchange - request AGN
+                let mut rng = rand::thread_rng();
+                let agn_message = if rng.gen::<bool>() { "AGN" } else { "?" };
 
-    fn check_waiting_for_callsign_agn_from_correction(&mut self) {
-        if let ContestState::WaitingForCallsignAgnFromCorrection {
-            caller,
-            correction_attempts,
-            wait_until,
-        } = &self.state
-        {
-            if Instant::now() >= *wait_until {
-                let caller = caller.clone();
-                let correction_attempts = *correction_attempts;
-
-                // Have station resend their callsign
                 let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
                     id: caller.params.id,
-                    callsign: caller.params.callsign.clone(),
+                    callsign: agn_message.to_string(),
                     exchange: caller.params.exchange.clone(),
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
                 }));
 
-                // Track that station is sending callsign repeat, will return to WaitingForCallCorrection when done
-                self.state = ContestState::SendingCorrectionRepeat {
-                    caller,
-                    correction_attempts,
+                self.state = ContestState::StationTransmitting {
+                    tx_type: StationTxType::RequestingAgn,
                 };
             }
-        }
-    }
+            CallerResponse::SendExchange => {
+                // Caller heard everything - send their exchange
+                let mut rng = rand::thread_rng();
 
-    fn check_waiting_for_partial_response_from_correction(&mut self) {
-        if let ContestState::WaitingForPartialResponseFromCorrection {
-            caller,
-            correction_attempts,
-            wait_until,
-        } = &self.state
-        {
-            if Instant::now() >= *wait_until {
-                let caller = caller.clone();
-                let correction_attempts = *correction_attempts;
+                // Still allow random AGN request based on simulation settings
+                if rng.gen::<f32>() < self.settings.simulation.agn_request_probability {
+                    let agn_message = if rng.gen::<bool>() { "AGN" } else { "?" };
 
-                // Have station send their callsign
-                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                    id: caller.params.id,
-                    callsign: caller.params.callsign.clone(),
-                    exchange: caller.params.exchange.clone(),
-                    frequency_offset_hz: caller.params.frequency_offset_hz,
-                    wpm: caller.params.wpm,
-                    amplitude: caller.params.amplitude,
-                }));
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: agn_message.to_string(),
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                    }));
 
-                // Track that station is sending callsign, will return to WaitingForCallCorrection when done
-                self.state = ContestState::SendingCorrectionRepeat {
-                    caller,
-                    correction_attempts,
-                };
+                    self.state = ContestState::StationTransmitting {
+                        tx_type: StationTxType::RequestingAgn,
+                    };
+                } else {
+                    // Normal flow - send their exchange
+                    let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
+
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: exchange_str,
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                    }));
+
+                    self.state = ContestState::StationTransmitting {
+                        tx_type: StationTxType::SendingExchange,
+                    };
+                }
             }
         }
     }
 
     fn maybe_spawn_callers(&mut self) {
-        if !matches!(self.state, ContestState::WaitingForCallers) {
+        if self.state != ContestState::WaitingForCallers {
             return;
         }
 
@@ -1111,73 +926,50 @@ impl ContestApp {
         );
 
         if !responding.is_empty() {
-            let mut callers = Vec::new();
+            let callers: Vec<ActiveCaller> = responding
+                .into_iter()
+                .map(|params| {
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
+                    ActiveCaller { params }
+                })
+                .collect();
 
-            for params in responding {
-                // Station sends their callsign
-                let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
-                callers.push(ActiveCaller { params });
-            }
-
-            self.state = ContestState::StationsCalling { callers };
+            self.context.set_callers(callers);
+            self.state = ContestState::StationsCalling;
         }
     }
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
-            // F1 - Send CQ (always available - persistent callers may retry)
+            // F1 - Send CQ (always available)
             if i.key_pressed(Key::F1) {
-                // Stop any playing audio
                 let _ = self.cmd_tx.send(AudioCommand::StopAll);
-                // Notify caller manager that CQ is restarting (callers get another chance)
                 self.caller_manager.on_cq_restart();
                 self.callsign_input.clear();
                 self.exchange_input.clear();
                 self.current_field = InputField::Callsign;
-                // Send CQ
                 self.send_cq();
             }
 
-            // F2 - Send Exchange (uses callsign from input field if available)
+            // F2 - Send Exchange only (available in any state with active caller)
             if i.key_pressed(Key::F2) {
-                // Handle resending exchange when caller requested AGN
-                if let ContestState::WaitingForUserExchangeRepeat { ref caller } = self.state {
-                    let caller = caller.clone();
-                    self.send_exchange_only();
-                    self.state = ContestState::SendingExchange { caller };
-                } else if let ContestState::StationsCalling { ref callers } = self.state {
-                    let entered_call = self.callsign_input.trim().to_uppercase();
-                    // Use entered callsign if it matches a caller, otherwise use first caller
-                    let callsign = if !entered_call.is_empty() {
-                        callers
-                            .iter()
-                            .find(|c| {
-                                c.params.callsign == entered_call
-                                    || c.params.callsign.contains(&entered_call)
-                            })
-                            .map(|c| c.params.callsign.clone())
-                    } else {
-                        callers.first().map(|c| c.params.callsign.clone())
-                    };
-                    if let Some(call) = callsign {
-                        self.send_exchange(&call);
-                    }
-                }
+                self.handle_f2_exchange();
             }
 
             // F3 - Send TU
             if i.key_pressed(Key::F3) {
                 self.send_tu();
+                self.state = ContestState::UserTransmitting {
+                    tx_type: UserTxType::Tu,
+                };
             }
 
-            // F5 - Query partial callsign (send what user typed + "AGN")
+            // F5 - Send his call only (available in any state with active caller)
             if i.key_pressed(Key::F5) {
-                self.handle_partial_query();
+                self.handle_f5_his_call();
             }
 
-            // F8 - Request AGN (ask station to repeat)
-            // In callsign field: ask station(s) to repeat callsign
-            // In exchange field: ask station to repeat exchange
+            // F8 - Request AGN
             if i.key_pressed(Key::F8) {
                 match self.current_field {
                     InputField::Callsign => self.handle_callsign_agn_request(),
@@ -1185,35 +977,29 @@ impl ContestApp {
                 }
             }
 
-            // F12 - Wipe (clear callsign and exchange fields)
+            // F12 - Wipe
             if i.key_pressed(Key::F12) {
                 self.callsign_input.clear();
                 self.exchange_input.clear();
                 self.current_field = InputField::Callsign;
             }
 
-            // Up arrow - Increase WPM
-            if i.key_pressed(Key::ArrowUp) {
-                if self.settings.user.wpm < 50 {
-                    self.settings.user.wpm += 1;
-                    self.settings_changed = true;
-                }
+            // Up/Down arrows - WPM adjustment
+            if i.key_pressed(Key::ArrowUp) && self.settings.user.wpm < 50 {
+                self.settings.user.wpm += 1;
+                self.settings_changed = true;
+            }
+            if i.key_pressed(Key::ArrowDown) && self.settings.user.wpm > 15 {
+                self.settings.user.wpm -= 1;
+                self.settings_changed = true;
             }
 
-            // Down arrow - Decrease WPM
-            if i.key_pressed(Key::ArrowDown) {
-                if self.settings.user.wpm > 15 {
-                    self.settings.user.wpm -= 1;
-                    self.settings_changed = true;
-                }
-            }
-
-            // Enter - Submit current field (or send CQ if callsign field is empty)
+            // Enter - Submit current field
             if i.key_pressed(Key::Enter) {
                 match self.current_field {
                     InputField::Callsign => {
                         if self.callsign_input.trim().is_empty() {
-                            // Empty callsign field - act like F1 (send CQ)
+                            // Empty callsign field - act like F1
                             let _ = self.cmd_tx.send(AudioCommand::StopAll);
                             self.caller_manager.on_cq_restart();
                             self.callsign_input.clear();
@@ -1230,11 +1016,8 @@ impl ContestApp {
                 }
             }
 
-            // Escape - Clear
+            // Escape - Stop transmission
             if i.key_pressed(Key::Escape) {
-                self.callsign_input.clear();
-                self.exchange_input.clear();
-                self.current_field = InputField::Callsign;
                 let _ = self.cmd_tx.send(AudioCommand::StopAll);
             }
 
@@ -1250,10 +1033,8 @@ impl ContestApp {
 
     fn apply_settings_changes(&mut self) {
         if self.settings_changed {
-            // Update contest type
             self.contest = contest::create_contest(self.settings.contest.contest_type);
 
-            // Update callsigns based on contest type
             if self.settings.contest.contest_type == ContestType::Cwt {
                 let cwt_callsigns = CwtCallsignPool::load(&self.settings.contest.cwt_callsign_file)
                     .unwrap_or_else(|_| CwtCallsignPool::default_pool());
@@ -1264,16 +1045,13 @@ impl ContestApp {
                 self.caller_manager.update_callsigns(callsigns);
             }
 
-            // Update caller manager settings
             self.caller_manager
                 .update_settings(self.settings.simulation.clone());
 
-            // Update audio settings
             let _ = self
                 .cmd_tx
                 .send(AudioCommand::UpdateSettings(self.settings.audio.clone()));
 
-            // Save settings to file
             if let Err(_e) = self.settings.save() {
                 #[cfg(debug_assertions)]
                 eprintln!("Failed to save settings: {}", _e);
@@ -1304,29 +1082,8 @@ impl eframe::App for ContestApp {
         // Maybe spawn callers
         self.maybe_spawn_callers();
 
-        // Check if waiting to send exchange
-        self.check_waiting_to_send_exchange();
-
-        // Check if waiting for AGN response
-        self.check_waiting_for_agn();
-
-        // Check if waiting for callsign AGN response
-        self.check_waiting_for_callsign_agn();
-
-        // Check if waiting for partial response
-        self.check_waiting_for_partial_response();
-
-        // Check if waiting to send call correction
-        self.check_waiting_to_send_call_correction();
-
-        // Check if waiting for callsign AGN response during correction flow
-        self.check_waiting_for_callsign_agn_from_correction();
-
-        // Check if waiting for partial response during correction flow
-        self.check_waiting_for_partial_response_from_correction();
-
-        // Check if waiting for tail-ender
-        self.check_waiting_for_tail_ender();
+        // Check waiting states
+        self.check_waiting_states();
 
         // Handle keyboard input
         self.handle_keyboard(ctx);
@@ -1349,7 +1106,7 @@ impl eframe::App for ContestApp {
             });
         });
 
-        // Settings window (separate OS window)
+        // Settings window
         if self.show_settings {
             let settings = &mut self.settings;
             let settings_changed = &mut self.settings_changed;
@@ -1363,10 +1120,8 @@ impl eframe::App for ContestApp {
                     .with_title("Settings")
                     .with_inner_size([475.0, 600.0]),
                 |ctx, _class| {
-                    // Update file dialog
                     file_dialog.update(ctx);
 
-                    // Check if a file was picked
                     if let Some(path) = file_dialog.take_picked() {
                         if let Some(path_str) = path.to_str() {
                             match file_dialog_target {
@@ -1401,7 +1156,7 @@ impl eframe::App for ContestApp {
             );
         }
 
-        // Stats window (separate OS window)
+        // Stats window
         if self.show_stats {
             render_stats_window(ctx, &self.session_stats, &mut self.show_stats);
         }
@@ -1411,7 +1166,6 @@ impl eframe::App for ContestApp {
             render_main_panel(ui, self);
         });
 
-        // Request continuous repaints for audio processing
         ctx.request_repaint();
     }
 }

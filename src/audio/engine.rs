@@ -84,7 +84,7 @@ impl AudioEngine {
                 let mut mono_buffer = vec![0.0f32; num_frames];
 
                 // Fill the mono buffer
-                let (completed_stations, user_completed) = {
+                let (completed_stations, user_completed, completed_segments) = {
                     let mut mixer = mixer.lock().unwrap();
                     mixer.fill_buffer(&mut mono_buffer)
                 };
@@ -101,6 +101,10 @@ impl AudioEngine {
                 // Send completion events
                 for station_id in completed_stations {
                     let _ = event_tx.try_send(AudioEvent::StationComplete(station_id));
+                }
+                // Send segment completion events before user message complete
+                for segment_type in completed_segments {
+                    let _ = event_tx.try_send(AudioEvent::UserSegmentComplete(segment_type));
                 }
                 if user_completed {
                     let _ = event_tx.try_send(AudioEvent::UserMessageComplete);
@@ -129,6 +133,9 @@ impl AudioEngine {
                         }
                         AudioCommand::PlayUserMessage { message, wpm } => {
                             mixer.play_user_message(&message, wpm);
+                        }
+                        AudioCommand::PlayUserMessageSegmented { segments, wpm } => {
+                            mixer.play_user_message_segmented(&segments, wpm);
                         }
                         AudioCommand::UpdateSettings(settings) => {
                             mixer.update_settings(settings);
