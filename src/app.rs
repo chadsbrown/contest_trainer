@@ -419,7 +419,7 @@ impl ContestApp {
             .iter()
             .map(|c| (c, Self::callsign_similarity(entered, &c.params.callsign)))
             .filter(|(_, sim)| *sim >= SIMILARITY_THRESHOLD)
-            .max_by(|(_, sim_a), (_, sim_b)| sim_a.partial_cmp(sim_b).unwrap())
+            .max_by(|(_, sim_a), (_, sim_b)| sim_a.total_cmp(sim_b))
             .map(|(caller, _)| caller)
     }
 
@@ -471,8 +471,10 @@ impl ContestApp {
         }
 
         if let ContestState::StationsCalling { ref callers } = self.state {
-            // Find the most similar caller
-            let caller = Self::find_similar_caller(&entered_call, callers).cloned();
+            // Find the most similar caller, or fall back to first caller if none match
+            let caller = Self::find_similar_caller(&entered_call, callers)
+                .or_else(|| callers.first())
+                .cloned();
 
             if let Some(caller) = caller {
                 // Check if the entered callsign is correct

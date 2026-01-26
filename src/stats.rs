@@ -135,21 +135,25 @@ impl SessionStats {
         let mut char_errors: HashMap<char, usize> = HashMap::new();
 
         for qso in &self.qsos {
-            // Analyze callsign characters
-            Self::compare_strings(
-                &qso.expected_callsign,
-                &qso.entered_callsign,
-                &mut char_totals,
-                &mut char_errors,
-            );
+            // Always count totals for all characters encountered
+            Self::count_chars(&qso.expected_callsign, &mut char_totals);
+            Self::count_chars(&qso.expected_exchange, &mut char_totals);
 
-            // Analyze exchange characters
-            Self::compare_strings(
-                &qso.expected_exchange,
-                &qso.entered_exchange,
-                &mut char_totals,
-                &mut char_errors,
-            );
+            // Only count errors when there was an actual mistake
+            if !qso.callsign_correct {
+                Self::count_errors(
+                    &qso.expected_callsign,
+                    &qso.entered_callsign,
+                    &mut char_errors,
+                );
+            }
+            if !qso.exchange_correct {
+                Self::count_errors(
+                    &qso.expected_exchange,
+                    &qso.entered_exchange,
+                    &mut char_errors,
+                );
+            }
         }
 
         // Calculate error rates and sort by error rate descending
@@ -168,32 +172,29 @@ impl SessionStats {
             .collect();
 
         // Sort by error rate descending, then by character ascending for stable ordering
-        results.sort_by(|a, b| match b.1.partial_cmp(&a.1) {
-            Some(std::cmp::Ordering::Equal) | None => a.0.cmp(&b.0),
-            Some(ord) => ord,
-        });
+        results.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         results
     }
 
-    fn compare_strings(
-        expected: &str,
-        entered: &str,
-        totals: &mut HashMap<char, usize>,
-        errors: &mut HashMap<char, usize>,
-    ) {
+    /// Count occurrences of each alphanumeric character in a string
+    fn count_chars(s: &str, totals: &mut HashMap<char, usize>) {
+        for ch in s.to_uppercase().chars() {
+            if ch.is_alphanumeric() {
+                *totals.entry(ch).or_insert(0) += 1;
+            }
+        }
+    }
+
+    /// Count character errors by comparing expected vs entered strings
+    fn count_errors(expected: &str, entered: &str, errors: &mut HashMap<char, usize>) {
         let expected_chars: Vec<char> = expected.to_uppercase().chars().collect();
         let entered_chars: Vec<char> = entered.to_uppercase().chars().collect();
 
-        // Simple character-by-character comparison
-        // For each expected character, count it and check if it appears correctly
         for (i, &exp_char) in expected_chars.iter().enumerate() {
             if !exp_char.is_alphanumeric() {
                 continue;
             }
 
-            *totals.entry(exp_char).or_insert(0) += 1;
-
-            // Check if this position matches
             let matches = entered_chars
                 .get(i)
                 .map(|&c| c == exp_char)
