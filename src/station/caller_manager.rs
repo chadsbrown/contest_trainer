@@ -317,9 +317,18 @@ impl CallerManager {
         let mut responding: Vec<StationParams> = Vec::new();
         let max_callers = self.settings.max_simultaneous_stations as usize;
 
-        // Sort by reaction time (faster operators first)
-        self.queue
-            .sort_by_key(|c| c.reaction_delay_ms + rng.gen_range(0..100));
+        // Sort by reaction time with jitter (faster operators first)
+        // Pre-compute jitter to avoid non-deterministic comparison during sort
+        let jitters: Vec<u32> = self.queue.iter().map(|_| rng.gen_range(0..100)).collect();
+        let mut indices: Vec<usize> = (0..self.queue.len()).collect();
+        indices.sort_by_key(|&i| self.queue[i].reaction_delay_ms + jitters[i]);
+
+        // Reorder queue based on sorted indices
+        let mut sorted_queue = Vec::with_capacity(self.queue.len());
+        for i in indices {
+            sorted_queue.push(self.queue[i].clone());
+        }
+        self.queue = sorted_queue;
 
         for caller in &mut self.queue {
             if responding.len() >= max_callers {
