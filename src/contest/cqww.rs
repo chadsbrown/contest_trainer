@@ -58,9 +58,12 @@ impl Contest for CqWwContest {
 
         let exchange_correct = match expected_exchange {
             Exchange::CqWw { zone, .. } => {
-                // Parse received exchange - expect "599 ZZ" or "5NN ZZ" format
+                // For CQWW, user only needs to log the zone number.
+                // The RST (599/5NN) is sent but not required to be logged.
+                // Accept either "ZZ" or "599 ZZ" / "5NN ZZ" format.
                 let parts: Vec<&str> = received_exchange.split_whitespace().collect();
                 if parts.len() >= 2 {
+                    // "599 ZZ" format - check the zone part
                     parts[1].parse::<u8>().map(|z| z == *zone).unwrap_or(false)
                 } else if parts.len() == 1 {
                     // Just the zone number
