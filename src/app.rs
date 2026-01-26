@@ -445,11 +445,12 @@ impl ContestApp {
         // Transition to appropriate state based on context
         if let Some(correction_attempts) = correction_context {
             // In correction context, always use the single caller (no matching needed)
-            let caller = callers.into_iter().next().unwrap();
-            self.state = ContestState::QueryingPartialFromCorrection {
-                caller,
-                correction_attempts,
-            };
+            if let Some(caller) = callers.into_iter().next() {
+                self.state = ContestState::QueryingPartialFromCorrection {
+                    caller,
+                    correction_attempts,
+                };
+            }
         } else {
             // Normal flow - find the most similar caller
             let matching_caller = Self::find_similar_caller(&partial, &callers);
@@ -661,11 +662,12 @@ impl ContestApp {
 
         // Transition to appropriate state based on context
         if let Some(correction_attempts) = correction_context {
-            let caller = callers.into_iter().next().unwrap();
-            self.state = ContestState::SendingCallsignAgnFromCorrection {
-                caller,
-                correction_attempts,
-            };
+            if let Some(caller) = callers.into_iter().next() {
+                self.state = ContestState::SendingCallsignAgnFromCorrection {
+                    caller,
+                    correction_attempts,
+                };
+            }
         } else {
             self.state = ContestState::SendingCallsignAgn { callers };
         }

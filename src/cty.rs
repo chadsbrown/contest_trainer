@@ -263,6 +263,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_embedded_cty_dat_parses_completely() {
+        // Validate that every entity header line in the embedded cty.dat parses correctly.
+        // This catches malformed data at build/test time rather than runtime.
+        let cty_data = include_str!("../data/cty.dat");
+
+        for (line_num, line) in cty_data.lines().enumerate() {
+            let line = line.trim();
+            // Entity header lines end with a colon and contain multiple colons
+            if !line.is_empty() && !line.ends_with(';') && !line.ends_with(',') {
+                if line.contains(':') && line.ends_with(':') {
+                    assert!(
+                        CtyDat::parse_header(line).is_some(),
+                        "Failed to parse cty.dat header at line {}: {}",
+                        line_num + 1,
+                        line
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_parse_header() {
         let line = "United States:            05:  08:  NA:   37.60:    91.87:     5.0:  K:";
         let entity = CtyDat::parse_header(line).unwrap();
