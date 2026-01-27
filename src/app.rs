@@ -869,8 +869,11 @@ impl ContestApp {
                 // Caller heard everything - send their exchange
                 let mut rng = rand::thread_rng();
 
-                // Still allow random AGN request based on simulation settings
-                if rng.gen::<f32>() < self.settings.simulation.agn_request_probability {
+                // Only allow random AGN before the caller has sent their exchange once
+                let allow_random_agn = !self.context.caller_exchange_sent_once;
+                if allow_random_agn
+                    && rng.gen::<f32>() < self.settings.simulation.agn_request_probability
+                {
                     let agn_message = if rng.gen::<bool>() { "AGN" } else { "?" };
 
                     let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
@@ -898,6 +901,7 @@ impl ContestApp {
                         amplitude: caller.params.amplitude,
                     }));
 
+                    self.context.caller_exchange_sent_once = true;
                     self.state = ContestState::StationTransmitting {
                         tx_type: StationTxType::SendingExchange,
                     };

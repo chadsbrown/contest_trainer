@@ -61,6 +61,8 @@ pub struct QsoContext {
     pub wait_until: Option<Instant>,
     /// Whether we're expecting caller to repeat their callsign (after partial query or F8)
     pub expecting_callsign_repeat: bool,
+    /// Whether the caller has already sent their exchange in this QSO
+    pub caller_exchange_sent_once: bool,
 }
 
 impl Default for QsoContext {
@@ -79,6 +81,7 @@ impl QsoContext {
             correction_attempts: 0,
             wait_until: None,
             expecting_callsign_repeat: false,
+            caller_exchange_sent_once: false,
         }
     }
 
@@ -91,6 +94,7 @@ impl QsoContext {
         self.correction_attempts = 0;
         self.wait_until = None;
         self.expecting_callsign_repeat = false;
+        self.caller_exchange_sent_once = false;
     }
 
     /// Set up context for a new set of callers
