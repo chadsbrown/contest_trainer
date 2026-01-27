@@ -68,6 +68,8 @@ pub struct QsoContext {
     pub correction_attempts: u8,
     pub wait_until: Option<Instant>,
     pub expecting_callsign_repeat: bool,
+    pub caller_exchange_sent_once: bool,
+    pub awaiting_user_exchange: bool,
 }
 ```
 
@@ -76,6 +78,27 @@ Key fields:
 - `active_callers`: All callers responding (for pileup situations)
 - `correction_in_progress`: Whether the station is correcting the user's callsign copy
 - `expecting_callsign_repeat`: Set after F5/F8 to tell `handle_station_response()` to have caller repeat their callsign
+- `caller_exchange_sent_once`: Tracks whether the caller has already sent their exchange in this QSO
+- `awaiting_user_exchange`: Set when we have the caller's callsign and are waiting on the user to send exchange (caller should stay silent)
+
+### How QsoProgress and QsoContext Are Updated
+
+- `sent_their_call` / `sent_our_exchange`: Set by `UserSegmentComplete` events when segmented user messages finish each element.
+- `received_their_call`: Set when the user submits a callsign (Enter in callsign field).
+- `received_their_exchange`: Set when the user submits an exchange (Enter in exchange field).
+- `expecting_callsign_repeat`: Set by F5 (non-exact match) or F8 in callsign field.
+- `awaiting_user_exchange`: Set by F5 when the entered callsign matches the selected caller and our exchange has not been sent yet. Cleared when we send exchange (F2 or full exchange).
+- `caller_exchange_sent_once`: Set when the caller sends their exchange; used to suppress random AGN requests after the first exchange.
+
+### Where Updates Happen in Code
+
+- `process_audio_events()` in `src/app.rs`: Updates `sent_their_call` and `sent_our_exchange` on `UserSegmentComplete`.
+- `handle_callsign_submit()` in `src/app.rs`: Sets `received_their_call` and selects the current caller.
+- `handle_exchange_submit()` in `src/app.rs`: Sets `received_their_exchange` and logs the QSO.
+- `handle_f5_his_call()` in `src/app.rs`: Sets `expecting_callsign_repeat` (non-exact match) or `awaiting_user_exchange` (exact match).
+- `send_exchange()` / `send_exchange_only()` in `src/app.rs`: Clears `awaiting_user_exchange`.
+- `handle_station_response()` in `src/app.rs`: Uses `CallerResponse::from_progress_and_context()` to decide what the caller does next.
+- `caller_exchange_sent_once`: Set when the caller actually sends their exchange; used to suppress random AGN requests after the first exchange.
 
 ### ContestState - Minimal State Enum
 
@@ -119,7 +142,7 @@ pub enum StationTxType {
 
 ## Caller Response Logic
 
-The `CallerResponse` enum determines how a caller responds based on `QsoProgress`:
+The `CallerResponse` enum determines how a caller responds based on `QsoProgress`, with a context override when needed:
 
 | sent_their_call | sent_our_exchange | CallerResponse |
 |-----------------|-------------------|----------------|
@@ -128,13 +151,15 @@ The `CallerResponse` enum determines how a caller responds based on `QsoProgress
 | true | false | RequestAgn (sends "AGN" or "?") |
 | true | true | SendExchange (sends their exchange) |
 
-This is implemented in `CallerResponse::from_progress()`.
+If `awaiting_user_exchange` is true and we have sent their callsign but not our exchange, `CallerResponse::Wait` is returned so the caller stays silent.
+
+This is implemented in `CallerResponse::from_progress_and_context()` (which delegates to `from_progress()` when no context override applies).
 
 **Special cases in `handle_station_response()`:**
 
 1. **`expecting_callsign_repeat = true`**: Caller repeats their callsign (after F5 or F8 in callsign field)
 2. **`correction_in_progress = true`**: Caller sends correction (75% once, 25% twice for emphasis)
-3. **Otherwise**: Uses `CallerResponse::from_progress()` to determine response
+3. **Otherwise**: Uses `CallerResponse::from_progress_and_context()` to determine response
 
 ## State Transitions
 
@@ -204,7 +229,8 @@ Any state with active callers
   │
   └─[F5]─► (StopAll audio)
            (Select matching caller if found)
-           (Set expecting_callsign_repeat = true)
+           (If exact match and exchange not sent: awaiting_user_exchange = true)
+           (Else: expecting_callsign_repeat = true)
                │
                ▼
            UserTransmitting { CallsignOnly }
@@ -212,8 +238,8 @@ Any state with active callers
                ▼ [UserMessageComplete]
            WaitingForStation
                │
-               ▼ [250ms, expecting_callsign_repeat = true]
-           StationsCalling (caller repeats their callsign)
+               ├─[CallerResponse::Wait]─► StationsCalling (caller stays silent, waiting for F2)
+               └─[expecting_callsign_repeat = true]─► StationsCalling (caller repeats their callsign)
 ```
 
 **Multiple AGN requests for callsign (e.g., user presses F5 three times):**
@@ -359,7 +385,7 @@ When the caller (station) needs our exchange repeated:
 ```
 WaitingForStation
   │
-  └─[~10% chance per CallerResponse::SendExchange]
+  └─[~10% chance per CallerResponse::SendExchange (first exchange only)]
            │
            ▼
        StationTransmitting { RequestingAgn }

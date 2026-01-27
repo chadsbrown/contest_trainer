@@ -63,6 +63,8 @@ pub struct QsoContext {
     pub expecting_callsign_repeat: bool,
     /// Whether the caller has already sent their exchange in this QSO
     pub caller_exchange_sent_once: bool,
+    /// Whether we expect to send our exchange next (suppress caller response)
+    pub awaiting_user_exchange: bool,
 }
 
 impl Default for QsoContext {
@@ -82,6 +84,7 @@ impl QsoContext {
             wait_until: None,
             expecting_callsign_repeat: false,
             caller_exchange_sent_once: false,
+            awaiting_user_exchange: false,
         }
     }
 
@@ -95,6 +98,7 @@ impl QsoContext {
         self.wait_until = None;
         self.expecting_callsign_repeat = false;
         self.caller_exchange_sent_once = false;
+        self.awaiting_user_exchange = false;
     }
 
     /// Set up context for a new set of callers

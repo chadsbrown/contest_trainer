@@ -233,6 +233,8 @@ impl ContestApp {
     }
 
     fn send_exchange(&mut self, their_call: &str) {
+        self.context.awaiting_user_exchange = false;
+
         let exchange = self.contest.user_exchange(
             &self.settings.user.callsign,
             self.user_serial,
@@ -262,6 +264,8 @@ impl ContestApp {
     }
 
     fn send_exchange_only(&mut self) {
+        self.context.awaiting_user_exchange = false;
+
         let exchange = self.contest.user_exchange(
             &self.settings.user.callsign,
             self.user_serial,
@@ -384,11 +388,21 @@ impl ContestApp {
             }
         }
 
+        let exact_match = self
+            .context
+            .get_current_caller()
+            .map(|c| entered_call == c.params.callsign)
+            .unwrap_or(false);
+
         // Send his call
         self.send_his_call();
 
-        // Mark that we expect the caller to repeat their callsign
-        self.context.expecting_callsign_repeat = true;
+        // If we have an exact match and no exchange sent yet, wait for the user to send exchange.
+        self.context.awaiting_user_exchange =
+            exact_match && !self.context.progress.sent_our_exchange;
+
+        // Only expect a repeat when the callsign isn't an exact match.
+        self.context.expecting_callsign_repeat = !exact_match;
 
         self.state = ContestState::UserTransmitting {
             tx_type: UserTxType::CallsignOnly,
@@ -824,7 +838,8 @@ impl ContestApp {
         }
 
         // Determine caller response based on what they've heard
-        let response = CallerResponse::from_progress(&self.context.progress);
+        let response =
+            CallerResponse::from_progress_and_context(&self.context.progress, &self.context);
 
         match response {
             CallerResponse::Confused => {
@@ -906,6 +921,11 @@ impl ContestApp {
                         tx_type: StationTxType::SendingExchange,
                     };
                 }
+            }
+            CallerResponse::Wait => {
+                // Caller waits silently for the user's exchange.
+                self.context.clear_wait();
+                self.state = ContestState::StationsCalling;
             }
         }
     }

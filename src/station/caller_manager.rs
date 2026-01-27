@@ -6,7 +6,7 @@ use crate::config::{PileupSettings, SimulationSettings};
 use crate::contest::{Contest, Exchange};
 use crate::cty::CtyDat;
 use crate::messages::{StationId, StationParams};
-use crate::state::QsoProgress;
+use crate::state::{QsoContext, QsoProgress};
 
 /// How a caller should respond based on what they've heard
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +17,8 @@ pub enum CallerResponse {
     RequestAgn,
     /// Caller heard both call and exchange - sends their exchange
     SendExchange,
+    /// Caller waits silently for the user's exchange
+    Wait,
 }
 
 impl CallerResponse {
@@ -36,6 +38,16 @@ impl CallerResponse {
             // If we haven't sent their call, they're confused regardless
             (false, _) => CallerResponse::Confused,
         }
+    }
+
+    /// Determine caller response using both QSO progress and context.
+    pub fn from_progress_and_context(progress: &QsoProgress, context: &QsoContext) -> Self {
+        if context.awaiting_user_exchange && progress.sent_their_call && !progress.sent_our_exchange
+        {
+            return CallerResponse::Wait;
+        }
+
+        Self::from_progress(progress)
     }
 }
 
@@ -487,6 +499,23 @@ mod tests {
         assert_eq!(
             CallerResponse::from_progress(&progress),
             CallerResponse::Confused
+        );
+    }
+
+    #[test]
+    fn test_caller_response_waits_when_awaiting_exchange() {
+        let progress = QsoProgress {
+            sent_their_call: true,
+            sent_our_exchange: false,
+            received_their_call: false,
+            received_their_exchange: false,
+        };
+        let mut context = QsoContext::new();
+        context.awaiting_user_exchange = true;
+
+        assert_eq!(
+            CallerResponse::from_progress_and_context(&progress, &context),
+            CallerResponse::Wait
         );
     }
 }
