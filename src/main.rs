@@ -7,6 +7,7 @@ mod config;
 mod contest;
 mod cty;
 mod messages;
+mod state;
 mod station;
 mod stats;
 mod ui;

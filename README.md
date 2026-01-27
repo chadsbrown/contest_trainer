@@ -164,15 +164,16 @@ Settings are stored in:
 
 ## Acknowledgements
 
-This application was created collaboratively with [Claude](https://www.anthropic.com/claude) (Opus), an AI assistant by Anthropic.
+This application was created collaboratively with [Claude](https://www.anthropic.com/claude) and [OpenAI Codex](https://openai.com/codex).
 
 Special thanks to the following people, who contributed feedback/ideas to the development of this application:
 - KD9UYC
 - DJ5CW
+- N9TTK
 
 ## About
 
-I created this for myself (N9UNX), but perhaps you might enjoy using it also.  There are several wonderful contest trainers (MorseRunner, G4FON, etc.) out there, and I've used them all.  They have their quirks, but they really helped me improve, and I can't thank the authors of those programs enough for their contributions.  That said, I always wanted something that was cross-platform (or was meant for Linux), so I decided to create this application.  It's still a work in progress, but complete enough that I am already using it as my main practice tool.  (Note:  it is overstatement to say that I created it, by a lot.  Claude Opus created 99% of it -- I merely provided requirements and prompts to get what I wanted, only fixing a few things here and there by hand.)
+I created this for myself (N9UNX), but perhaps you might enjoy using it also.  There are several wonderful contest trainers (MorseRunner, G4FON, etc.) out there, and I've used them all.  They have their quirks, but they really helped me improve, and I can't thank the authors of those programs enough for their contributions.  That said, I always wanted something that was cross-platform (or was meant for Linux), so I decided to create this application.  It's still a work in progress, but complete enough that I am already using it as my main practice tool.  (Note:  it is overstatement to say that I created it, by a lot.  Claude and Codex created 99% of it -- I merely provided requirements and prompts to get what I wanted, only fixing a few things here and there by hand.)
 
 ## Roadmap
 

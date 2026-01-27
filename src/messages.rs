@@ -5,6 +5,29 @@ use crate::contest::Exchange;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StationId(pub u32);
 
+/// Type of segment within a user message
+/// Used for element-level tracking of what has been transmitted
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MessageSegmentType {
+    /// The caller's callsign (e.g., "W1ABC")
+    TheirCallsign,
+    /// Our exchange (e.g., "5NN 05")
+    OurExchange,
+    /// CQ call (e.g., "CQ TEST K1ABC")
+    Cq,
+    /// Thank you / QSO complete
+    Tu,
+    /// AGN or ? request
+    Agn,
+}
+
+/// A segment of a user message with its type
+#[derive(Clone, Debug)]
+pub struct MessageSegment {
+    pub content: String,
+    pub segment_type: MessageSegmentType,
+}
+
 /// Parameters defining a calling station
 #[derive(Clone, Debug)]
 pub struct StationParams {
@@ -22,7 +45,14 @@ pub enum AudioCommand {
     /// Start playing morse for a station
     StartStation(StationParams),
     /// Play a message as the user's station (CQ, exchange, TU)
+    #[allow(dead_code)]
     PlayUserMessage { message: String, wpm: u8 },
+    /// Play a segmented message with element-level completion tracking
+    /// Each segment will emit a UserSegmentComplete event when finished
+    PlayUserMessageSegmented {
+        segments: Vec<MessageSegment>,
+        wpm: u8,
+    },
     /// Update global audio settings
     UpdateSettings(AudioSettings),
     /// Stop all audio (except noise)
@@ -36,4 +66,7 @@ pub enum AudioEvent {
     StationComplete(StationId),
     /// User message finished playing
     UserMessageComplete,
+    /// A segment of the user message finished playing
+    /// Emitted for each segment in a segmented message before UserMessageComplete
+    UserSegmentComplete(MessageSegmentType),
 }

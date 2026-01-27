@@ -6,6 +6,50 @@ use crate::config::{PileupSettings, SimulationSettings};
 use crate::contest::{Contest, Exchange};
 use crate::cty::CtyDat;
 use crate::messages::{StationId, StationParams};
+use crate::state::{QsoContext, QsoProgress};
+
+/// How a caller should respond based on what they've heard
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallerResponse {
+    /// Caller is confused - resends their callsign or sends "?"
+    Confused,
+    /// Caller heard their call but not exchange - sends "AGN" or "?"
+    RequestAgn,
+    /// Caller heard both call and exchange - sends their exchange
+    SendExchange,
+    /// Caller waits silently for the user's exchange
+    Wait,
+}
+
+impl CallerResponse {
+    /// Determine the appropriate caller response based on QSO progress
+    ///
+    /// This implements the caller response table:
+    /// | sent_their_call | sent_our_exchange | Response |
+    /// |-----------------|-------------------|----------|
+    /// | false           | false             | Confused |
+    /// | true            | false             | RequestAgn |
+    /// | false           | true              | Confused (unusual case) |
+    /// | true            | true              | SendExchange |
+    pub fn from_progress(progress: &QsoProgress) -> Self {
+        match (progress.sent_their_call, progress.sent_our_exchange) {
+            (true, true) => CallerResponse::SendExchange,
+            (true, false) => CallerResponse::RequestAgn,
+            // If we haven't sent their call, they're confused regardless
+            (false, _) => CallerResponse::Confused,
+        }
+    }
+
+    /// Determine caller response using both QSO progress and context.
+    pub fn from_progress_and_context(progress: &QsoProgress, context: &QsoContext) -> Self {
+        if context.awaiting_user_exchange && progress.sent_their_call && !progress.sent_our_exchange
+        {
+            return CallerResponse::Wait;
+        }
+
+        Self::from_progress(progress)
+    }
+}
 
 /// Source of callsigns - either regular or CWT-specific
 pub enum CallsignSource {
@@ -400,5 +444,78 @@ impl CallerManager {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_caller_response_from_progress() {
+        // Nothing sent - caller is confused
+        let progress = QsoProgress {
+            sent_their_call: false,
+            sent_our_exchange: false,
+            received_their_call: false,
+            received_their_exchange: false,
+        };
+        assert_eq!(
+            CallerResponse::from_progress(&progress),
+            CallerResponse::Confused
+        );
+
+        // Sent their call but not our exchange - caller requests AGN
+        let progress = QsoProgress {
+            sent_their_call: true,
+            sent_our_exchange: false,
+            received_their_call: false,
+            received_their_exchange: false,
+        };
+        assert_eq!(
+            CallerResponse::from_progress(&progress),
+            CallerResponse::RequestAgn
+        );
+
+        // Sent both - caller sends their exchange
+        let progress = QsoProgress {
+            sent_their_call: true,
+            sent_our_exchange: true,
+            received_their_call: false,
+            received_their_exchange: false,
+        };
+        assert_eq!(
+            CallerResponse::from_progress(&progress),
+            CallerResponse::SendExchange
+        );
+
+        // Edge case: sent exchange but not their call - still confused
+        let progress = QsoProgress {
+            sent_their_call: false,
+            sent_our_exchange: true,
+            received_their_call: false,
+            received_their_exchange: false,
+        };
+        assert_eq!(
+            CallerResponse::from_progress(&progress),
+            CallerResponse::Confused
+        );
+    }
+
+    #[test]
+    fn test_caller_response_waits_when_awaiting_exchange() {
+        let progress = QsoProgress {
+            sent_their_call: true,
+            sent_our_exchange: false,
+            received_their_call: false,
+            received_their_exchange: false,
+        };
+        let mut context = QsoContext::new();
+        context.awaiting_user_exchange = true;
+
+        assert_eq!(
+            CallerResponse::from_progress_and_context(&progress, &context),
+            CallerResponse::Wait
+        );
     }
 }

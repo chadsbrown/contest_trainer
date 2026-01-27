@@ -53,15 +53,14 @@ impl Contest for CwtContest {
         let exchange_correct = match expected_exchange {
             Exchange::Cwt { name, number } => {
                 // Parse received exchange - expect "NAME NUMBER" format
+                // Both parts are required for a correct exchange
                 let parts: Vec<&str> = received_exchange.split_whitespace().collect();
                 if parts.len() >= 2 {
                     let name_correct = parts[0].eq_ignore_ascii_case(name);
                     let number_correct = parts[1].eq_ignore_ascii_case(number);
                     name_correct && number_correct
-                } else if parts.len() == 1 {
-                    // Just check if it matches either name or number
-                    parts[0].eq_ignore_ascii_case(name) || parts[0].eq_ignore_ascii_case(number)
                 } else {
+                    // Must have both name and number
                     false
                 }
             }

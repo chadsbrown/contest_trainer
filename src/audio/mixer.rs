@@ -1,7 +1,7 @@
 use super::morse::{text_to_morse, MorseElement, MorseTimer, ToneGenerator};
 use super::noise::NoiseGenerator;
 use crate::config::{AudioSettings, QsbSettings};
-use crate::messages::{StationId, StationParams};
+use crate::messages::{MessageSegment, MessageSegmentType, StationId, StationParams};
 use rand::Rng;
 
 /// QSB (fading) oscillator that produces natural-sounding signal fading
@@ -257,10 +257,126 @@ impl UserStation {
     }
 }
 
+/// User station with segment tracking for element-level completion events
+/// Each segment emits a completion event when finished
+pub struct SegmentedUserStation {
+    pub elements: Vec<MorseElement>,
+    pub current_element_idx: usize,
+    pub samples_in_element: usize,
+    pub samples_elapsed: usize,
+    pub tone_generator: ToneGenerator,
+    pub timer: MorseTimer,
+    pub completed: bool,
+    /// Segment boundaries: (element_index_end, segment_type)
+    /// Each entry marks where a segment ends (exclusive)
+    pub segment_boundaries: Vec<(usize, MessageSegmentType)>,
+    /// Index into segment_boundaries for the next segment to complete
+    pub current_segment_idx: usize,
+}
+
+impl SegmentedUserStation {
+    pub fn new(segments: &[MessageSegment], wpm: u8, sample_rate: u32, frequency_hz: f32) -> Self {
+        let mut all_elements = Vec::new();
+        let mut segment_boundaries = Vec::new();
+
+        for (idx, segment) in segments.iter().enumerate() {
+            // Add word gap between segments (except before the first)
+            if idx > 0 && !all_elements.is_empty() {
+                all_elements.push(MorseElement::WordGap);
+            }
+            let segment_elements = text_to_morse(&segment.content);
+            all_elements.extend(segment_elements);
+            // Mark where this segment ends
+            segment_boundaries.push((all_elements.len(), segment.segment_type));
+        }
+
+        let timer = MorseTimer::new(sample_rate, wpm);
+        let mut tone_generator = ToneGenerator::new(frequency_hz, sample_rate);
+        tone_generator.reset_phase();
+
+        let samples_in_element = if all_elements.is_empty() {
+            0
+        } else {
+            timer.element_samples(all_elements[0])
+        };
+
+        Self {
+            elements: all_elements,
+            current_element_idx: 0,
+            samples_in_element,
+            samples_elapsed: 0,
+            tone_generator,
+            timer,
+            completed: false,
+            segment_boundaries,
+            current_segment_idx: 0,
+        }
+    }
+
+    /// Generate the next sample for this station
+    /// Returns None if the station is done sending
+    pub fn next_sample(&mut self) -> Option<f32> {
+        if self.completed || self.current_element_idx >= self.elements.len() {
+            self.completed = true;
+            return None;
+        }
+
+        let element = self.elements[self.current_element_idx];
+
+        let sample = if element.is_tone() {
+            let raw = self.tone_generator.next_sample();
+            let envelope = self
+                .tone_generator
+                .envelope(self.samples_elapsed, self.samples_in_element);
+            raw * envelope * 0.8 // User's own signal at consistent level
+        } else {
+            0.0
+        };
+
+        self.samples_elapsed += 1;
+
+        if self.samples_elapsed >= self.samples_in_element {
+            self.current_element_idx += 1;
+            self.samples_elapsed = 0;
+
+            if self.current_element_idx < self.elements.len() {
+                self.samples_in_element = self
+                    .timer
+                    .element_samples(self.elements[self.current_element_idx]);
+            }
+        }
+
+        Some(sample)
+    }
+
+    /// Check if a segment just completed
+    /// Returns the segment type if a segment boundary was just crossed
+    pub fn check_segment_completion(&mut self) -> Option<MessageSegmentType> {
+        if self.current_segment_idx >= self.segment_boundaries.len() {
+            return None;
+        }
+
+        let (boundary_idx, segment_type) = self.segment_boundaries[self.current_segment_idx];
+
+        // Segment is complete when we've moved past its boundary
+        if self.current_element_idx >= boundary_idx {
+            self.current_segment_idx += 1;
+            return Some(segment_type);
+        }
+
+        None
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.completed
+    }
+}
+
 /// Mixes multiple audio sources together
 pub struct Mixer {
     pub stations: Vec<ActiveStation>,
     pub user_station: Option<UserStation>,
+    pub segmented_user_station: Option<SegmentedUserStation>,
     pub noise: NoiseGenerator,
     pub settings: AudioSettings,
 }
@@ -270,6 +386,7 @@ impl Mixer {
         Self {
             stations: Vec::new(),
             user_station: None,
+            segmented_user_station: None,
             noise: NoiseGenerator::new(sample_rate),
             settings,
         }
@@ -289,8 +406,22 @@ impl Mixer {
 
     /// Start playing a user message
     pub fn play_user_message(&mut self, message: &str, wpm: u8) {
+        // Clear any segmented station when starting a plain message
+        self.segmented_user_station = None;
         self.user_station = Some(UserStation::new(
             message,
+            wpm,
+            self.settings.sample_rate,
+            self.settings.tone_frequency_hz,
+        ));
+    }
+
+    /// Start playing a segmented user message with element-level tracking
+    pub fn play_user_message_segmented(&mut self, segments: &[MessageSegment], wpm: u8) {
+        // Clear any plain station when starting a segmented message
+        self.user_station = None;
+        self.segmented_user_station = Some(SegmentedUserStation::new(
+            segments,
             wpm,
             self.settings.sample_rate,
             self.settings.tone_frequency_hz,
@@ -313,12 +444,18 @@ impl Mixer {
     pub fn clear_all(&mut self) {
         self.stations.clear();
         self.user_station = None;
+        self.segmented_user_station = None;
     }
 
-    /// Fill a buffer with mixed audio, returns list of completed station IDs
-    pub fn fill_buffer(&mut self, buffer: &mut [f32]) -> (Vec<StationId>, bool) {
+    /// Fill a buffer with mixed audio
+    /// Returns: (completed_station_ids, user_completed, completed_segments)
+    pub fn fill_buffer(
+        &mut self,
+        buffer: &mut [f32],
+    ) -> (Vec<StationId>, bool, Vec<MessageSegmentType>) {
         let mut completed_stations = Vec::new();
         let mut user_completed = false;
+        let mut completed_segments = Vec::new();
 
         // Clear buffer
         for sample in buffer.iter_mut() {
@@ -326,7 +463,8 @@ impl Mixer {
         }
 
         // Add noise (optionally muted while user is transmitting)
-        let mute_noise = self.settings.mute_noise_during_tx && self.user_station.is_some();
+        let mute_noise = self.settings.mute_noise_during_tx
+            && (self.user_station.is_some() || self.segmented_user_station.is_some());
         if !mute_noise {
             self.noise
                 .fill_buffer(buffer, self.settings.noise_level, &self.settings.noise);
@@ -349,7 +487,7 @@ impl Mixer {
         // Remove completed stations
         self.stations.retain(|s| !s.is_completed());
 
-        // Mix user station if active
+        // Mix plain user station if active
         if let Some(ref mut user) = self.user_station {
             for sample in buffer.iter_mut() {
                 if let Some(user_sample) = user.next_sample() {
@@ -361,6 +499,29 @@ impl Mixer {
             if user.is_completed() {
                 user_completed = true;
                 self.user_station = None;
+            }
+        }
+
+        // Mix segmented user station if active
+        if let Some(ref mut user) = self.segmented_user_station {
+            for sample in buffer.iter_mut() {
+                if let Some(user_sample) = user.next_sample() {
+                    *sample += user_sample;
+                } else {
+                    break;
+                }
+                // Check for segment completion after each sample
+                if let Some(segment_type) = user.check_segment_completion() {
+                    completed_segments.push(segment_type);
+                }
+            }
+            // Final check for any remaining segment completions
+            while let Some(segment_type) = user.check_segment_completion() {
+                completed_segments.push(segment_type);
+            }
+            if user.is_completed() {
+                user_completed = true;
+                self.segmented_user_station = None;
             }
         }
 
@@ -377,6 +538,6 @@ impl Mixer {
             }
         }
 
-        (completed_stations, user_completed)
+        (completed_stations, user_completed, completed_segments)
     }
 }
