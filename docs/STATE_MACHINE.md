@@ -299,6 +299,8 @@ StationTransmitting { SendingExchange }
            StationTransmitting { SendingExchange } (caller resends exchange)
 ```
 
+**Note:** F8 routing now prefers callsign repeat during correction flow (or when no callsign has been copied), regardless of cursor position. In those cases F8 triggers the callsign-repeat path.
+
 **Multiple AGN requests for exchange:**
 
 ```

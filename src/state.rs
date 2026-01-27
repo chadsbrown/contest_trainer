@@ -121,6 +121,15 @@ impl QsoContext {
         self.current_caller.as_ref()
     }
 
+    /// Determine whether F8 should request a callsign repeat.
+    pub fn wants_callsign_repeat(&self) -> bool {
+        if self.correction_in_progress || self.expecting_callsign_repeat {
+            return true;
+        }
+
+        !self.progress.received_their_call
+    }
+
     /// Start correction flow
     pub fn start_correction(&mut self) {
         self.correction_in_progress = true;

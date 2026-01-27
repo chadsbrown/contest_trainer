@@ -605,8 +605,15 @@ impl ContestApp {
     }
 
     fn handle_callsign_agn_request(&mut self) {
-        // Works when stations are calling
-        if self.state != ContestState::StationsCalling {
+        // Works when stations are calling, or during call correction
+        let allowed_in_correction = self.context.correction_in_progress
+            && matches!(
+                self.state,
+                ContestState::StationTransmitting {
+                    tx_type: StationTxType::Correction
+                }
+            );
+        if self.state != ContestState::StationsCalling && !allowed_in_correction {
             return;
         }
 
@@ -995,9 +1002,12 @@ impl ContestApp {
 
             // F8 - Request AGN
             if i.key_pressed(Key::F8) {
-                match self.current_field {
-                    InputField::Callsign => self.handle_callsign_agn_request(),
-                    InputField::Exchange => self.handle_agn_request(),
+                if self.context.wants_callsign_repeat()
+                    || self.current_field == InputField::Callsign
+                {
+                    self.handle_callsign_agn_request();
+                } else {
+                    self.handle_agn_request();
                 }
             }
 
