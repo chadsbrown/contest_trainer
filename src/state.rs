@@ -31,11 +31,13 @@ impl QsoProgress {
     }
 
     /// Check if we've sent enough info for the caller to send their exchange
+    #[allow(dead_code)]
     pub fn caller_can_send_exchange(&self) -> bool {
         self.sent_their_call && self.sent_our_exchange
     }
 
     /// Check if the QSO is complete (all info exchanged)
+    #[allow(dead_code)]
     pub fn is_complete(&self) -> bool {
         self.sent_their_call
             && self.sent_our_exchange
@@ -131,6 +133,7 @@ impl QsoContext {
     }
 
     /// Start correction flow
+    #[allow(dead_code)]
     pub fn start_correction(&mut self) {
         self.correction_in_progress = true;
         self.correction_attempts = 0;
@@ -169,6 +172,7 @@ impl QsoContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UserTxType {
     /// CQ call
+    #[allow(dead_code)]
     Cq,
     /// Sending their call + our exchange (Enter in callsign field)
     Exchange,
@@ -186,6 +190,7 @@ pub enum UserTxType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StationTxType {
     /// Station(s) sending their callsign (responding to CQ or repeat)
+    #[allow(dead_code)]
     CallingUs,
     /// Station sending their exchange
     SendingExchange,
@@ -232,6 +237,7 @@ pub enum ContestState {
 
 impl ContestState {
     /// Check if user is currently transmitting
+    #[allow(dead_code)]
     pub fn is_user_transmitting(&self) -> bool {
         matches!(
             self,
@@ -240,6 +246,7 @@ impl ContestState {
     }
 
     /// Check if a station is currently transmitting
+    #[allow(dead_code)]
     pub fn is_station_transmitting(&self) -> bool {
         matches!(
             self,
@@ -248,6 +255,7 @@ impl ContestState {
     }
 
     /// Check if we're in any waiting state
+    #[allow(dead_code)]
     pub fn is_waiting(&self) -> bool {
         matches!(
             self,

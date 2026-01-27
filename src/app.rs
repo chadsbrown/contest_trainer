@@ -218,9 +218,14 @@ impl ContestApp {
         let message = format!("{} {}", cq_prefix, callsign);
         let wpm = self.settings.user.wpm;
 
+        let segments = vec![MessageSegment {
+            content: message,
+            segment_type: MessageSegmentType::Cq,
+        }];
+
         let _ = self
             .cmd_tx
-            .send(AudioCommand::PlayUserMessage { message, wpm });
+            .send(AudioCommand::PlayUserMessageSegmented { segments, wpm });
 
         self.state = ContestState::CallingCq;
 
@@ -291,9 +296,14 @@ impl ContestApp {
         let message = format!("TU {}", self.settings.user.callsign);
         let wpm = self.settings.user.wpm;
 
+        let segments = vec![MessageSegment {
+            content: message,
+            segment_type: MessageSegmentType::Tu,
+        }];
+
         let _ = self
             .cmd_tx
-            .send(AudioCommand::PlayUserMessage { message, wpm });
+            .send(AudioCommand::PlayUserMessageSegmented { segments, wpm });
     }
 
     fn send_his_call(&mut self) {
@@ -593,8 +603,12 @@ impl ContestApp {
 
         // Send the AGN message
         let agn_message = self.settings.user.agn_message.clone();
-        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
-            message: agn_message,
+        let segments = vec![MessageSegment {
+            content: agn_message,
+            segment_type: MessageSegmentType::Agn,
+        }];
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessageSegmented {
+            segments,
             wpm: self.settings.user.wpm,
         });
 
@@ -622,8 +636,12 @@ impl ContestApp {
 
         // Send the AGN message
         let agn_message = self.settings.user.agn_message.clone();
-        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessage {
-            message: agn_message,
+        let segments = vec![MessageSegment {
+            content: agn_message,
+            segment_type: MessageSegmentType::Agn,
+        }];
+        let _ = self.cmd_tx.send(AudioCommand::PlayUserMessageSegmented {
+            segments,
             wpm: self.settings.user.wpm,
         });
 

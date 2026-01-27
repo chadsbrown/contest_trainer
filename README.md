@@ -169,6 +169,7 @@ This application was created collaboratively with [Claude](https://www.anthropic
 Special thanks to the following people, who contributed feedback/ideas to the development of this application:
 - KD9UYC
 - DJ5CW
+- N9TTK
 
 ## About
 
