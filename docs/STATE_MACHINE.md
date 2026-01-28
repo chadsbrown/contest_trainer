@@ -29,7 +29,7 @@ This design enables:
 - **CallerResponse**: Determines how a caller responds based on what they've heard
 - **CallerManager**: Manages a persistent queue of callers with patience/retry behavior
 - **ActiveCaller**: Wrapper around StationParams for a station currently in play
-- **InputField**: Tracks whether user is in Callsign or Exchange field
+- **InputField**: Tracks whether user is in Callsign or which Exchange field index is focused
 
 ### Audio Events
 
@@ -85,7 +85,7 @@ Key fields:
 
 - `sent_their_call` / `sent_our_exchange`: Set by `UserSegmentComplete` events when segmented user messages finish each element.
 - `received_their_call`: Set when the user submits a callsign (Enter in callsign field).
-- `received_their_exchange`: Set when the user submits an exchange (Enter in exchange field).
+- `received_their_exchange`: Set when the user submits an exchange (Enter in any exchange field).
 - `expecting_callsign_repeat`: Set by F5 (non-exact match) or F8 in callsign field.
 - `awaiting_user_exchange`: Set by F5 when the entered callsign matches the selected caller and our exchange has not been sent yet. Cleared when we send exchange (F2 or full exchange).
 - `caller_exchange_sent_once`: Set when the caller sends their exchange; used to suppress random AGN requests after the first exchange.
@@ -205,7 +205,7 @@ Idle
   │                              ▼ [250ms elapsed, CallerResponse::SendExchange]
   │                         StationTransmitting { SendingExchange }
   │                              │
-  │                              ▼ [Enter in exchange field]
+  │                              ▼ [Enter in any exchange field]
   │                         QsoComplete
   │                              │
   │                              ▼ [UserMessageComplete: TU]
@@ -283,7 +283,7 @@ StationsCalling
            StationsCalling (caller repeats their callsign)
 ```
 
-**In exchange field (`StationTransmitting { SendingExchange }` state):**
+**In any exchange field (`StationTransmitting { SendingExchange }` state):**
 ```
 StationTransmitting { SendingExchange }
   │
@@ -440,16 +440,19 @@ The `CallerManager` handles persistence:
 | F1 | Any | Stop all, send CQ (callers may retry) |
 | Enter | Callsign field (empty) | Same as F1 |
 | Enter | Callsign field (text) | Submit callsign, send call + exchange |
-| Enter | Exchange field | Submit exchange, log QSO |
+| Enter | Any exchange field | Submit exchange, log QSO |
 | F2 | Any (with active caller) | Send exchange only |
 | F3 | Any | Send TU |
 | F5 | Any (with active caller) | Send his call (callsign only) |
 | F8 | Callsign field | Request callsign repeat |
-| F8 | Exchange field | Request exchange repeat |
-| F12 | Any | Wipe (clear both fields) |
-| Tab | Any | Switch between callsign/exchange fields |
+| F8 | Any exchange field | Request exchange repeat |
+| F12 | Any | Wipe (clear callsign + exchange fields) |
+| Tab | Any | Move to next field (Shift+Tab moves to previous field) |
+| Space | Any | Move to next field (Shift+Space moves to previous field) |
 | Escape | Any | Stop transmission (does not clear fields) |
 | Up/Down | Any | Adjust user WPM |
+
+**Focus note:** After entering a callsign, focus moves to the contest-preferred exchange field (first field with `focus_on_enter = true`), otherwise the first exchange field.
 
 **Note on F2/F5:** These now work in any state with an active caller, stopping current audio if needed. This allows recovery from mistakes (e.g., typo the callsign, press Escape, press F5 to resend just the call, then F2 to resend just the exchange).
 

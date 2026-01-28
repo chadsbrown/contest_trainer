@@ -7,7 +7,7 @@ A Morse code contest simulator for practicing CW contest operating skills.
 1. Launch the application
 2. Press **F1** or **Enter** to call CQ
 3. Copy the callsign of responding stations into the **Call** field
-4. Press **Tab** to move to the **Exch** field and enter the received exchange
+4. Press **Tab** or **Space** to move through the exchange fields and enter the received exchange
 5. Press **Enter** to log the QSO
 6. Repeat!
 
@@ -21,9 +21,10 @@ A Morse code contest simulator for practicing CW contest operating skills.
 | F5 | Send his callsign |
 | F8 | Request repeat (AGN/?) |
 | F12 | Wipe/clear current QSO |
-| Enter | Submit current field |
-| Tab | Move between Call and Exchange fields |
-| Esc | Clear current field |
+| Enter | Submit current field (or send CQ when callsign is empty) |
+| Tab | Move to next field (Shift+Tab moves backward) |
+| Space | Move to next field (Shift+Space moves backward) |
+| Esc | Stop transmission audio |
 
 ## Settings
 
@@ -37,21 +38,6 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Purpose**: Your amateur radio callsign used during the simulated contest
 - **Default**: `N9UNX`
 - **Values**: Any valid callsign string
-
-### Your Name
-- **Purpose**: Your operator name, sent as part of exchange in contests that require it (e.g., CWT)
-- **Default**: `OP`
-- **Values**: Any name string (automatically uppercased)
-
-### CQ Zone
-- **Purpose**: Your CQ zone number for CQ WW contest exchanges
-- **Default**: `5`
-- **Values**: 1-40
-
-### Section/Exchange
-- **Purpose**: Your ARRL section or exchange value for contests like Sweepstakes
-- **Default**: `CT`
-- **Values**: Valid ARRL section abbreviation or exchange string
 
 ### Your WPM
 - **Purpose**: The speed at which your CW transmissions are sent
@@ -73,6 +59,8 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Default**: `true` (enabled)
 - **Values**: true/false
 
+Contest-specific exchange fields (like Name, Zone, Section, or Exchange) are configured under **Active Contest**.
+
 ---
 
 ## Contest Settings
@@ -84,21 +72,31 @@ Access settings via **File > Settings**. Settings are automatically saved to you
   - **CQ World Wide (CqWw)**: Exchange is RST + CQ Zone (e.g., `599 05`)
   - **ARRL Sweepstakes**: Exchange is serial + precedence + check + section (e.g., `42 A 99 CT`)
   - **CWT**: Exchange is name + number or name + state (e.g., `BOB 123` or `JOE TX`)
+  - **ARRL DX CW**: Exchange is RST + exchange (state/province or power) (e.g., `599 CT` or `599 100`)
 
-### Callsign File
-- **Purpose**: Path to the file containing callsigns for simulated stations
-- **Default**: `callsigns.txt`
-- **Values**: Path to a text file with one callsign per line
+---
 
-### CWT Callsign File
-- **Purpose**: Path to the file containing callsigns specifically for CWT contests (includes name/number data)
-- **Default**: `cwt_callsigns.txt`
-- **Values**: Path to a CWT-formatted callsign file
+## Active Contest
+
+These fields are defined by the selected contest and can vary by contest type.
 
 ### CQ Message
 - **Purpose**: The CQ message sent when calling CQ
 - **Default**: `CQ TEST`
 - **Values**: Any CQ message string
+
+### Callsign File
+- **Purpose**: Path to the file containing callsigns for simulated stations
+- **Default**: Varies by contest (e.g., `callsigns.txt`, `cwt_callsigns.txt`, `arrldx_callsigns.txt`)
+- **Values**: Path to a contest-appropriate callsign file
+
+### Your Exchange
+- **Purpose**: Contest-defined exchange fields for your station
+- **Examples**:
+  - **CWT**: Name + Number/State
+  - **CQ WW**: CQ Zone
+  - **Sweepstakes**: Precedence + Check + Section
+  - **ARRL DX CW**: Exchange (State/Province or Power)
 
 ---
 
@@ -133,6 +131,18 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Purpose**: Probability that a calling station will request you repeat your exchange (sends AGN or ?)
 - **Default**: `0.1` (10%)
 - **Values**: 0.0-1.0
+
+### Filter Callers by Country
+- **Purpose**: Bias the caller pool toward DX or domestic stations using callsign prefix lookups
+- **Default**: `false` (disabled)
+- **Values**: true/false
+
+### Same Country Probability
+- **Purpose**: When filtering is enabled, controls how often callers are from your same DXCC country
+- **Default**: `0.1` (10% domestic)
+- **Values**: 0.0-1.0 (lower = more DX, higher = more domestic)
+
+**How it works**: Callsigns are mapped to DXCC entities using the embedded `cty.dat` prefix database. When filtering is enabled, the simulator uses this mapping to bias caller selection toward DX or same‑country stations according to the probability setting.
 
 ---
 
@@ -222,6 +232,7 @@ Opens a detailed statistics window showing:
 | CQ WW | RST + Zone | `599 05` |
 | Sweepstakes | Serial + Prec + Check + Section | `42 A 99 CT` |
 | CWT | Name + Number (or Name + State) | `BOB 123` or `JOE TX` |
+| ARRL DX CW | RST + Exchange (State/Province or Power) | `599 CT` or `599 100` |
 
 ---
 

@@ -16,6 +16,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 2. **Download the callsign files** from this repository (right click, save as) and place them in the same directory as the binary:
    - [`callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/callsigns.txt) - for non-CWT contests (this is just a copy of SCP)
    - [`cwt_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/cwt_callsigns.txt) - for CWT contest (this is just a copy of the history file for CWT from N1MM+)
+   - [`arrldx_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/arrldx_callsigns.txt) - for ARRL DX CW (copy of history file for ARRL DX CW from N1MM+)
 
 3. **Run the application** 
 4. **Personalize settings** (File->Settings) to configure your callsign, name and exchange info.
@@ -24,7 +25,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 ## Features
 
 - **Multi-platform Support**: Run on Windows, macOS, and Linux
-- **Multiple Contest Types**: Practice for CWT (default), and CQ World Wide (ARRL Sweepstakes planned)
+- **Multiple Contest Types**: Practice for CWT (default), CQ World Wide, ARRL Sweepstakes, and ARRL DX CW
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
 - **Multiple Simultaneous Callers**: Handle pileups with multiple stations calling at once
 - **Background Noise**: Adjustable noise level to simulate real band conditions
@@ -51,6 +52,7 @@ Pre-built binaries for Windows, macOS (Intel and Apple Silicon), and Linux are a
 | F12 | Wipe (clear callsign and exchange fields) |
 | Enter | Submit current field / Send CQ if empty |
 | Tab | Switch between callsign and exchange fields |
+| Space | Move between exchange fields |
 | Up Arrow | Increase your WPM |
 | Down Arrow | Decrease your WPM |
 | Esc | Clear inputs and stop audio |
@@ -79,10 +81,9 @@ Access settings via File > Settings. The settings window opens as a separate win
 
 ### Contest Settings
 
-- **Contest Type**: Select from CQ World Wide, ARRL Sweepstakes, or CWT
+- **Contest Type**: Select from CWT, CQ World Wide, ARRL Sweepstakes, or ARRL DX CW
 - **CQ Message**: Your CQ message (default: "CQ TEST")
-- **Callsign File**: File containing callsigns for non-CWT contests
-- **CWT Callsign File**: File containing CWT stations with name/member data
+- **Callsign File**: Per-contest callsign file used by the selected contest (if applicable)
 
 ### Simulation Settings
 
@@ -130,6 +131,17 @@ K5ZD, RANDY, 2
 W9RE, MIKE, IN
 ```
 
+### ARRL DX Format (arrldx_callsigns.txt)
+
+CSV format with Call, Name, State, Power, UserText. Provide either State or Power (not both).
+
+```
+# Call,Name,State,Power,UserText
+2E0CVN,,,50,
+K3LR,,PA,,
+3Z0X,,,K,
+```
+
 ## Building from Source
 
 Requires Rust toolchain.
@@ -173,13 +185,12 @@ Special thanks to the following people, who contributed feedback/ideas to the de
 
 ## About
 
-I created this for myself (N9UNX), but perhaps you might enjoy using it also.  There are several wonderful contest trainers (MorseRunner, G4FON, etc.) out there, and I've used them all.  They have their quirks, but they really helped me improve, and I can't thank the authors of those programs enough for their contributions.  That said, I always wanted something that was cross-platform (or was meant for Linux), so I decided to create this application.  It's still a work in progress, but complete enough that I am already using it as my main practice tool.  (Note:  it is overstatement to say that I created it, by a lot.  Claude and Codex created 99% of it -- I merely provided requirements and prompts to get what I wanted, only fixing a few things here and there by hand.)
+I created this for myself (N9UNX), but perhaps you might enjoy using it also.  There are several wonderful contest trainers (MorseRunner, G4FON, etc.) out there, and I've used them all.  They have their quirks, but they really helped me improve, and I can't thank the authors of those programs enough for their contributions.  That said, I always wanted something that was cross-platform (or was meant for Linux), so I decided to create this application.  It's still a work in progress, but complete enough that I am already using it as my main practice tool.  (Note:  it is overstatement to say that I created it, by a lot.  Claude (Opus) and Codex (gpt-5.2) created 99% of it -- I merely provided requirements and prompts to get what I wanted, only fixing a few things here and there by hand.)
 
 ## Roadmap
 
-- Perhaps add more contests, if people want them.  Honestly, I could live with just the CWT as the exchange is great practice (w/o a history file, as it is here, and in my opinion how it should be for a practice tool like this).
-- Perhaps think about what 2BSIQ would be like, and how it should operate.
-- QSB?
+- Perhaps add more contests, if people want them (I imagine the will).  Honestly, I could live with just the CWT as the exchange is great practice (w/o a history file, as it is here, and in my opinion how it should be for a practice tool like this).
+- Perhaps think about what 2BSIQ would be like, and how it should operate. (presently testing, but more work needed)
 - Feedback welcome.
 
 ## License
