@@ -63,10 +63,10 @@ impl Contest for SweepstakesContest {
 
     fn exchange_fields(&self) -> Vec<ExchangeField> {
         vec![
-            ExchangeField::new("serial", "NR", "001", 4, FieldKind::Number),
-            ExchangeField::new("precedence", "Prec", "A", 1, FieldKind::Text),
-            ExchangeField::new("check", "CK", "99", 2, FieldKind::Number),
-            ExchangeField::new("section", "Sec", "CT", 3, FieldKind::Section),
+            ExchangeField::new("NR", "001", 4, FieldKind::Number),
+            ExchangeField::new("Prec", "A", 1, FieldKind::Text),
+            ExchangeField::new("CK", "99", 2, FieldKind::Number),
+            ExchangeField::new("Sec", "CT", 3, FieldKind::Section),
         ]
     }
 

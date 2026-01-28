@@ -183,80 +183,6 @@ impl ActiveStation {
     }
 }
 
-/// User station for playing CQ, exchanges, etc.
-pub struct UserStation {
-    pub elements: Vec<MorseElement>,
-    pub current_element_idx: usize,
-    pub samples_in_element: usize,
-    pub samples_elapsed: usize,
-    pub tone_generator: ToneGenerator,
-    pub timer: MorseTimer,
-    pub completed: bool,
-}
-
-impl UserStation {
-    pub fn new(message: &str, wpm: u8, sample_rate: u32, frequency_hz: f32) -> Self {
-        let elements = text_to_morse(message);
-        let timer = MorseTimer::new(sample_rate, wpm);
-        let mut tone_generator = ToneGenerator::new(frequency_hz, sample_rate);
-        tone_generator.reset_phase();
-
-        let samples_in_element = if elements.is_empty() {
-            0
-        } else {
-            timer.element_samples(elements[0])
-        };
-
-        Self {
-            elements,
-            current_element_idx: 0,
-            samples_in_element,
-            samples_elapsed: 0,
-            tone_generator,
-            timer,
-            completed: false,
-        }
-    }
-
-    pub fn next_sample(&mut self) -> Option<f32> {
-        if self.completed || self.current_element_idx >= self.elements.len() {
-            self.completed = true;
-            return None;
-        }
-
-        let element = self.elements[self.current_element_idx];
-
-        let sample = if element.is_tone() {
-            let raw = self.tone_generator.next_sample();
-            let envelope = self
-                .tone_generator
-                .envelope(self.samples_elapsed, self.samples_in_element);
-            raw * envelope * 0.8 // User's own signal at consistent level
-        } else {
-            0.0
-        };
-
-        self.samples_elapsed += 1;
-
-        if self.samples_elapsed >= self.samples_in_element {
-            self.current_element_idx += 1;
-            self.samples_elapsed = 0;
-
-            if self.current_element_idx < self.elements.len() {
-                self.samples_in_element = self
-                    .timer
-                    .element_samples(self.elements[self.current_element_idx]);
-            }
-        }
-
-        Some(sample)
-    }
-
-    pub fn is_completed(&self) -> bool {
-        self.completed
-    }
-}
-
 /// User station with segment tracking for element-level completion events
 /// Each segment emits a completion event when finished
 pub struct SegmentedUserStation {
@@ -375,7 +301,6 @@ impl SegmentedUserStation {
 /// Mixes multiple audio sources together
 pub struct Mixer {
     pub stations: Vec<ActiveStation>,
-    pub user_station: Option<UserStation>,
     pub segmented_user_station: Option<SegmentedUserStation>,
     pub noise: NoiseGenerator,
     pub settings: AudioSettings,
@@ -385,7 +310,6 @@ impl Mixer {
     pub fn new(sample_rate: u32, settings: AudioSettings) -> Self {
         Self {
             stations: Vec::new(),
-            user_station: None,
             segmented_user_station: None,
             noise: NoiseGenerator::new(sample_rate),
             settings,
@@ -404,22 +328,8 @@ impl Mixer {
         self.stations.push(station);
     }
 
-    /// Start playing a user message
-    pub fn play_user_message(&mut self, message: &str, wpm: u8) {
-        // Clear any segmented station when starting a plain message
-        self.segmented_user_station = None;
-        self.user_station = Some(UserStation::new(
-            message,
-            wpm,
-            self.settings.sample_rate,
-            self.settings.tone_frequency_hz,
-        ));
-    }
-
     /// Start playing a segmented user message with element-level tracking
     pub fn play_user_message_segmented(&mut self, segments: &[MessageSegment], wpm: u8) {
-        // Clear any plain station when starting a segmented message
-        self.user_station = None;
         self.segmented_user_station = Some(SegmentedUserStation::new(
             segments,
             wpm,
@@ -443,7 +353,6 @@ impl Mixer {
     /// Clear all stations
     pub fn clear_all(&mut self) {
         self.stations.clear();
-        self.user_station = None;
         self.segmented_user_station = None;
     }
 
@@ -463,8 +372,8 @@ impl Mixer {
         }
 
         // Add noise (optionally muted while user is transmitting)
-        let mute_noise = self.settings.mute_noise_during_tx
-            && (self.user_station.is_some() || self.segmented_user_station.is_some());
+        let mute_noise =
+            self.settings.mute_noise_during_tx && self.segmented_user_station.is_some();
         if !mute_noise {
             self.noise
                 .fill_buffer(buffer, self.settings.noise_level, &self.settings.noise);
@@ -486,21 +395,6 @@ impl Mixer {
 
         // Remove completed stations
         self.stations.retain(|s| !s.is_completed());
-
-        // Mix plain user station if active
-        if let Some(ref mut user) = self.user_station {
-            for sample in buffer.iter_mut() {
-                if let Some(user_sample) = user.next_sample() {
-                    *sample += user_sample;
-                } else {
-                    break;
-                }
-            }
-            if user.is_completed() {
-                user_completed = true;
-                self.user_station = None;
-            }
-        }
 
         // Mix segmented user station if active
         if let Some(ref mut user) = self.segmented_user_station {

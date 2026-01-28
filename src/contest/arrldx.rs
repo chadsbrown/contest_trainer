@@ -175,9 +175,8 @@ impl Contest for ArrlDxContest {
 
     fn exchange_fields(&self) -> Vec<ExchangeField> {
         vec![
-            ExchangeField::new("rst", "RST", "5NN", 3, FieldKind::Text).with_default_value("5NN"),
-            ExchangeField::new("exchange", "Exchange", "ST/PWR", 6, FieldKind::Alnum)
-                .focus_on_enter(),
+            ExchangeField::new("RST", "5NN", 3, FieldKind::Text).with_default_value("5NN"),
+            ExchangeField::new("Exchange", "ST/PWR", 6, FieldKind::Alnum).focus_on_enter(),
         ]
     }
 

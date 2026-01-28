@@ -29,21 +29,6 @@ impl QsoProgress {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
-
-    /// Check if we've sent enough info for the caller to send their exchange
-    #[allow(dead_code)]
-    pub fn caller_can_send_exchange(&self) -> bool {
-        self.sent_their_call && self.sent_our_exchange
-    }
-
-    /// Check if the QSO is complete (all info exchanged)
-    #[allow(dead_code)]
-    pub fn is_complete(&self) -> bool {
-        self.sent_their_call
-            && self.sent_our_exchange
-            && self.received_their_call
-            && self.received_their_exchange
-    }
 }
 
 /// Context data for the current QSO, separate from the state enum
@@ -132,13 +117,6 @@ impl QsoContext {
         !self.progress.received_their_call
     }
 
-    /// Start correction flow
-    #[allow(dead_code)]
-    pub fn start_correction(&mut self) {
-        self.correction_in_progress = true;
-        self.correction_attempts = 0;
-    }
-
     /// Increment correction attempt
     pub fn increment_correction_attempt(&mut self) {
         self.correction_attempts += 1;
@@ -171,9 +149,6 @@ impl QsoContext {
 /// What type of message the user is transmitting
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UserTxType {
-    /// CQ call
-    #[allow(dead_code)]
-    Cq,
     /// Sending their call + our exchange (Enter in callsign field)
     Exchange,
     /// Sending just their callsign (F5)
@@ -190,8 +165,6 @@ pub enum UserTxType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StationTxType {
     /// Station(s) sending their callsign (responding to CQ or repeat)
-    #[allow(dead_code)]
-    CallingUs,
     /// Station sending their exchange
     SendingExchange,
     /// Station requesting AGN (sending "AGN" or "?")
@@ -236,35 +209,6 @@ pub enum ContestState {
 }
 
 impl ContestState {
-    /// Check if user is currently transmitting
-    #[allow(dead_code)]
-    pub fn is_user_transmitting(&self) -> bool {
-        matches!(
-            self,
-            ContestState::CallingCq | ContestState::UserTransmitting { .. }
-        )
-    }
-
-    /// Check if a station is currently transmitting
-    #[allow(dead_code)]
-    pub fn is_station_transmitting(&self) -> bool {
-        matches!(
-            self,
-            ContestState::StationsCalling | ContestState::StationTransmitting { .. }
-        )
-    }
-
-    /// Check if we're in any waiting state
-    #[allow(dead_code)]
-    pub fn is_waiting(&self) -> bool {
-        matches!(
-            self,
-            ContestState::WaitingForCallers
-                | ContestState::WaitingForStation
-                | ContestState::WaitingForTailEnder
-        )
-    }
-
     /// Get status text and color for UI display
     pub fn status_text(&self, context: &QsoContext) -> (&'static str, StatusColor) {
         match self {
@@ -279,7 +223,6 @@ impl ContestState {
                 }
             }
             ContestState::UserTransmitting { tx_type } => match tx_type {
-                UserTxType::Cq => ("Calling CQ...", StatusColor::Yellow),
                 UserTxType::Exchange => ("Sending exchange...", StatusColor::Yellow),
                 UserTxType::CallsignOnly => {
                     if context.active_callers.len() > 1 {
@@ -300,9 +243,6 @@ impl ContestState {
                 }
             }
             ContestState::StationTransmitting { tx_type } => match tx_type {
-                StationTxType::CallingUs => {
-                    ("Station calling - enter callsign", StatusColor::Green)
-                }
                 StationTxType::SendingExchange => (
                     "Receiving exchange - press Enter to log",
                     StatusColor::Green,
@@ -341,43 +281,6 @@ mod tests {
         assert!(!progress.sent_our_exchange);
         assert!(!progress.received_their_call);
         assert!(!progress.received_their_exchange);
-        assert!(!progress.caller_can_send_exchange());
-        assert!(!progress.is_complete());
-    }
-
-    #[test]
-    fn test_qso_progress_caller_can_send_exchange() {
-        let mut progress = QsoProgress::new();
-
-        // Can't send exchange if we haven't sent their call
-        progress.sent_our_exchange = true;
-        assert!(!progress.caller_can_send_exchange());
-
-        // Can't send exchange if we haven't sent our exchange
-        progress.sent_their_call = true;
-        progress.sent_our_exchange = false;
-        assert!(!progress.caller_can_send_exchange());
-
-        // Can send exchange if we've sent both
-        progress.sent_our_exchange = true;
-        assert!(progress.caller_can_send_exchange());
-    }
-
-    #[test]
-    fn test_qso_progress_is_complete() {
-        let mut progress = QsoProgress::new();
-
-        progress.sent_their_call = true;
-        assert!(!progress.is_complete());
-
-        progress.sent_our_exchange = true;
-        assert!(!progress.is_complete());
-
-        progress.received_their_call = true;
-        assert!(!progress.is_complete());
-
-        progress.received_their_exchange = true;
-        assert!(progress.is_complete());
     }
 
     #[test]
@@ -394,36 +297,6 @@ mod tests {
         assert!(!progress.sent_our_exchange);
         assert!(!progress.received_their_call);
         assert!(!progress.received_their_exchange);
-    }
-
-    #[test]
-    fn test_contest_state_helpers() {
-        let state = ContestState::Idle;
-        assert!(!state.is_user_transmitting());
-        assert!(!state.is_station_transmitting());
-        assert!(!state.is_waiting());
-
-        let state = ContestState::CallingCq;
-        assert!(state.is_user_transmitting());
-        assert!(!state.is_station_transmitting());
-
-        let state = ContestState::UserTransmitting {
-            tx_type: UserTxType::Exchange,
-        };
-        assert!(state.is_user_transmitting());
-        assert!(!state.is_station_transmitting());
-
-        let state = ContestState::StationTransmitting {
-            tx_type: StationTxType::CallingUs,
-        };
-        assert!(!state.is_user_transmitting());
-        assert!(state.is_station_transmitting());
-
-        let state = ContestState::StationsCalling;
-        assert!(state.is_station_transmitting());
-
-        let state = ContestState::WaitingForStation;
-        assert!(state.is_waiting());
     }
 
     #[test]

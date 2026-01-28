@@ -833,10 +833,6 @@ impl ContestApp {
                     StationTxType::SendingExchange => {
                         // Exchange received, stay in this state for user to log
                     }
-                    StationTxType::CallingUs => {
-                        // Station finished calling, transition to StationsCalling
-                        self.state = ContestState::StationsCalling;
-                    }
                 }
             }
             ContestState::StationsCalling => {
@@ -855,10 +851,6 @@ impl ContestApp {
             }
             ContestState::UserTransmitting { tx_type } => {
                 match tx_type {
-                    UserTxType::Cq => {
-                        self.state = ContestState::WaitingForCallers;
-                        self.last_cq_finished = Some(Instant::now());
-                    }
                     UserTxType::Exchange | UserTxType::ExchangeOnly => {
                         // Exchange sent, wait for station response
                         self.context.set_wait(250);

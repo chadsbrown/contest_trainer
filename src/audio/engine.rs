@@ -131,9 +131,6 @@ impl AudioEngine {
                             let message = params.callsign.clone();
                             mixer.add_station(&params, &message);
                         }
-                        AudioCommand::PlayUserMessage { message, wpm } => {
-                            mixer.play_user_message(&message, wpm);
-                        }
                         AudioCommand::PlayUserMessageSegmented { segments, wpm } => {
                             mixer.play_user_message_segmented(&segments, wpm);
                         }

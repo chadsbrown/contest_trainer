@@ -185,8 +185,8 @@ impl Contest for CwtContest {
 
     fn exchange_fields(&self) -> Vec<ExchangeField> {
         vec![
-            ExchangeField::new("name", "Name", "BOB", 8, FieldKind::Text),
-            ExchangeField::new("number", "Number", "123", 6, FieldKind::Alnum),
+            ExchangeField::new("Name", "BOB", 8, FieldKind::Text),
+            ExchangeField::new("Number", "123", 6, FieldKind::Alnum),
         ]
     }
 

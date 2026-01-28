@@ -51,8 +51,8 @@ impl Contest for CqWwContest {
 
     fn exchange_fields(&self) -> Vec<ExchangeField> {
         vec![
-            ExchangeField::new("rst", "RST", "5NN", 3, FieldKind::Text).with_default_value("5NN"),
-            ExchangeField::new("zone", "Zone", "05", 2, FieldKind::Number).focus_on_enter(),
+            ExchangeField::new("RST", "5NN", 3, FieldKind::Text).with_default_value("5NN"),
+            ExchangeField::new("Zone", "05", 2, FieldKind::Number).focus_on_enter(),
         ]
     }
 

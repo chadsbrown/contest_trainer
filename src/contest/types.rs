@@ -27,33 +27,27 @@ pub fn normalize_exchange_input(value: &str, kind: FieldKind) -> String {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct ExchangeField {
-    pub id: &'static str,
     pub label: &'static str,
     pub placeholder: &'static str,
     pub width_chars: u8,
     pub kind: FieldKind,
-    pub optional: bool,
     pub default_value: Option<&'static str>,
     pub focus_on_enter: bool,
 }
 
 impl ExchangeField {
     pub fn new(
-        id: &'static str,
         label: &'static str,
         placeholder: &'static str,
         width_chars: u8,
         kind: FieldKind,
     ) -> Self {
         Self {
-            id,
             label,
             placeholder,
             width_chars,
             kind,
-            optional: false,
             default_value: None,
             focus_on_enter: false,
         }

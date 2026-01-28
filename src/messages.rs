@@ -44,9 +44,6 @@ pub struct StationParams {
 pub enum AudioCommand {
     /// Start playing morse for a station
     StartStation(StationParams),
-    /// Play a message as the user's station (CQ, exchange, TU)
-    #[allow(dead_code)]
-    PlayUserMessage { message: String, wpm: u8 },
     /// Play a segmented message with element-level completion tracking
     /// Each segment will emit a UserSegmentComplete event when finished
     PlayUserMessageSegmented {
