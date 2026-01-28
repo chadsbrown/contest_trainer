@@ -1,10 +1,11 @@
-use crate::contest::ContestType;
+use crate::contest::{self, Contest};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub user: UserSettings,
-    pub contest: ContestSettings,
+    pub contest: ContestConfig,
     pub audio: AudioSettings,
     pub simulation: SimulationSettings,
 }
@@ -12,9 +13,6 @@ pub struct AppSettings {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct UserSettings {
     pub callsign: String,
-    pub name: String,
-    pub zone: u8,
-    pub section: String,
     pub wpm: u8,
     pub font_size: f32,
     pub agn_message: String,
@@ -23,11 +21,10 @@ pub struct UserSettings {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct ContestSettings {
-    pub contest_type: ContestType,
-    pub callsign_file: String,
-    pub cwt_callsign_file: String,
-    pub cq_message: String,
+pub struct ContestConfig {
+    pub active_contest_id: String,
+    #[serde(default)]
+    pub contests: HashMap<String, toml::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,7 +125,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             user: UserSettings::default(),
-            contest: ContestSettings::default(),
+            contest: ContestConfig::default(),
             audio: AudioSettings::default(),
             simulation: SimulationSettings::default(),
         }
@@ -139,9 +136,6 @@ impl Default for UserSettings {
     fn default() -> Self {
         Self {
             callsign: "N9UNX".to_string(),
-            name: "OP".to_string(),
-            zone: 5,
-            section: "CT".to_string(),
             wpm: 32,
             font_size: 14.0,
             agn_message: "?".to_string(),
@@ -150,13 +144,18 @@ impl Default for UserSettings {
     }
 }
 
-impl Default for ContestSettings {
+impl Default for ContestConfig {
     fn default() -> Self {
+        let mut contests = HashMap::new();
+        let contest_id = contest::default_contest_id().unwrap_or("cwt");
+        let settings = contest::create_contest(contest_id)
+            .map(|contest| contest.default_settings())
+            .unwrap_or_else(|| toml::Value::Table(toml::value::Table::new()));
+        contests.insert(contest_id.to_string(), settings);
+
         Self {
-            contest_type: ContestType::Cwt,
-            callsign_file: "callsigns.txt".to_string(),
-            cwt_callsign_file: "cwt_callsigns.txt".to_string(),
-            cq_message: "CQ TEST".to_string(),
+            active_contest_id: contest_id.to_string(),
+            contests,
         }
     }
 }
@@ -237,6 +236,42 @@ impl Default for PileupSettings {
     }
 }
 
+pub struct SettingsLoadResult {
+    pub settings: AppSettings,
+    pub notice: Option<String>,
+}
+
+impl ContestConfig {
+    pub fn settings_for_mut(&mut self, contest: &dyn Contest) -> &mut toml::Value {
+        let entry = self
+            .contests
+            .entry(contest.id().to_string())
+            .or_insert_with(|| contest.default_settings());
+
+        let defaults = contest.default_settings();
+        merge_defaults(entry, defaults);
+
+        if contest.validate_settings(entry).is_err() {
+            *entry = contest.default_settings();
+        }
+
+        entry
+    }
+}
+
+fn merge_defaults(target: &mut toml::Value, defaults: toml::Value) {
+    match (target, defaults) {
+        (toml::Value::Table(target_table), toml::Value::Table(default_table)) => {
+            for (key, value) in default_table {
+                target_table.entry(key).or_insert(value);
+            }
+        }
+        (target_value, defaults_value) => {
+            *target_value = defaults_value;
+        }
+    }
+}
+
 impl AppSettings {
     /// Get the default config file path
     pub fn config_path() -> std::path::PathBuf {
@@ -248,18 +283,42 @@ impl AppSettings {
     }
 
     /// Load settings from the default config path, or return defaults if not found
-    pub fn load_or_default() -> Self {
+    pub fn load_with_notice() -> SettingsLoadResult {
         let path = Self::config_path();
         match Self::load(&path) {
             Ok(settings) => {
                 #[cfg(debug_assertions)]
                 eprintln!("Loaded settings from {}", path.display());
-                settings
+                SettingsLoadResult {
+                    settings,
+                    notice: None,
+                }
             }
             Err(_) => {
+                let mut notice = None;
+                if path.exists() {
+                    let backup_path = backup_settings_file(&path);
+                    if let Some(backup_path) = backup_path {
+                        notice = Some(format!(
+                            "Settings file was reset due to an incompatible format. Backup saved to {}",
+                            backup_path.display()
+                        ));
+                    } else {
+                        notice = Some(
+                            "Settings file was reset due to an incompatible format.".to_string(),
+                        );
+                    }
+                }
+
                 #[cfg(debug_assertions)]
-                eprintln!("Using default settings (no config at {})", path.display());
-                Self::default()
+                eprintln!(
+                    "Using default settings (unable to load config at {})",
+                    path.display()
+                );
+                SettingsLoadResult {
+                    settings: Self::default(),
+                    notice,
+                }
             }
         }
     }
@@ -283,5 +342,20 @@ impl AppSettings {
         #[cfg(debug_assertions)]
         eprintln!("Saved settings to {}", path.display());
         Ok(())
+    }
+}
+
+fn backup_settings_file(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())?;
+    let file_name = path.file_name()?.to_string_lossy();
+    let backup_name = format!("{}.bak.{}", file_name, timestamp);
+    let backup_path = path.with_file_name(backup_name);
+    if std::fs::rename(path, &backup_path).is_ok() {
+        Some(backup_path)
+    } else {
+        None
     }
 }

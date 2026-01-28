@@ -437,10 +437,7 @@ mod tests {
             params: StationParams {
                 id: StationId(1),
                 callsign: "W1AW".to_string(),
-                exchange: Exchange::CqWw {
-                    rst: "599".to_string(),
-                    zone: 5,
-                },
+                exchange: Exchange::new(vec!["5NN".to_string(), "05".to_string()]),
                 frequency_offset_hz: 0.0,
                 wpm: 25,
                 amplitude: 1.0,
@@ -451,10 +448,7 @@ mod tests {
             params: StationParams {
                 id: StationId(2),
                 callsign: "K3LR".to_string(),
-                exchange: Exchange::CqWw {
-                    rst: "599".to_string(),
-                    zone: 5,
-                },
+                exchange: Exchange::new(vec!["5NN".to_string(), "05".to_string()]),
                 frequency_offset_hz: 100.0,
                 wpm: 30,
                 amplitude: 0.8,

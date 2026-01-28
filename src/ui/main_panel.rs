@@ -1,4 +1,5 @@
 use crate::app::{ContestApp, InputField, Score};
+use crate::contest::normalize_exchange_input;
 use crate::state::StatusColor;
 use egui::{Color32, RichText, Vec2};
 
@@ -6,10 +7,20 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     // Contest type display
     ui.horizontal(|ui| {
         ui.label(RichText::new("Contest:").strong());
-        ui.label(app.settings.contest.contest_type.display_name());
+        ui.label(app.contest.display_name());
     });
 
     ui.add_space(4.0);
+
+    if let Some(notice) = app.settings_notice.clone() {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(notice).color(Color32::YELLOW));
+            if ui.button("Dismiss").clicked() {
+                app.settings_notice = None;
+            }
+        });
+        ui.add_space(4.0);
+    }
 
     // Top bar: Score display
     render_score_bar(ui, &app.score, app.settings.user.wpm);
@@ -110,6 +121,21 @@ fn render_status(ui: &mut egui::Ui, app: &ContestApp) {
 }
 
 fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
+    let exchange_fields = app.contest.exchange_fields();
+    if app.exchange_inputs.len() != exchange_fields.len() {
+        let defaults = app.exchange_default_values();
+        let mut next = Vec::with_capacity(exchange_fields.len());
+        for idx in 0..exchange_fields.len() {
+            let value = app
+                .exchange_inputs
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| defaults.get(idx).cloned().unwrap_or_default());
+            next.push(value);
+        }
+        app.exchange_inputs = next;
+    }
+
     ui.horizontal(|ui| {
         ui.label(RichText::new("Call:").strong());
         let call_response = ui.add_sized(
@@ -126,36 +152,43 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
         if app.current_field == InputField::Callsign && !app.show_settings {
             call_response.request_focus();
         }
+        if call_response.clicked() {
+            app.current_field = InputField::Callsign;
+        }
 
         ui.add_space(20.0);
 
         ui.label(RichText::new("Exch:").strong());
-        let exch_response = ui.add_sized(
-            Vec2::new(150.0, 24.0),
-            egui::TextEdit::singleline(&mut app.exchange_input)
-                .font(egui::TextStyle::Monospace)
-                .hint_text("Exchange"),
-        );
+        for (idx, field) in exchange_fields.iter().enumerate() {
+            ui.add_space(6.0);
+            ui.label(RichText::new(field.label).small());
+            let width_px = exchange_field_width(ui, field.width_chars, app.settings.user.font_size);
+            let response = ui.add_sized(
+                Vec2::new(width_px, 24.0),
+                egui::TextEdit::singleline(&mut app.exchange_inputs[idx])
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text(field.placeholder),
+            );
+            if response.changed() {
+                let normalized = normalize_exchange_input(&app.exchange_inputs[idx], field.kind);
+                app.exchange_inputs[idx] = normalized;
+            }
 
-        if exch_response.changed() {
-            app.exchange_input = app.exchange_input.to_uppercase();
-        }
-
-        if app.current_field == InputField::Exchange && !app.show_settings {
-            exch_response.request_focus();
+            if app.current_field == InputField::Exchange(idx) && !app.show_settings {
+                response.request_focus();
+            }
+            if response.clicked() {
+                app.current_field = InputField::Exchange(idx);
+                app.last_exchange_field_index = idx;
+            }
         }
     });
+}
 
-    // Show expected exchange format hint
-    ui.horizontal(|ui| {
-        ui.add_space(50.0);
-        let hint = match app.settings.contest.contest_type {
-            crate::contest::ContestType::CqWw => "Format: RST ZONE (e.g., 599 05)",
-            crate::contest::ContestType::Sweepstakes => "Format: NR PREC CK SEC (e.g., 42 A 99 CT)",
-            crate::contest::ContestType::Cwt => "Format: NAME NUMBER (e.g., BOB 123 or JOE TX)",
-        };
-        ui.label(RichText::new(hint).small().weak());
-    });
+fn exchange_field_width(ui: &egui::Ui, width_chars: u8, font_size: f32) -> f32 {
+    let _ = ui;
+    let char_width = (font_size * 0.6).max(6.0);
+    char_width * width_chars as f32 + 8.0
 }
 
 fn render_key_hints(ui: &mut egui::Ui) {
