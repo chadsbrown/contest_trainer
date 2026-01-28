@@ -1,17 +1,27 @@
-pub mod cqww;
-pub mod cwt;
-pub mod sweepstakes;
+pub mod callsign;
 pub mod types;
 
-pub use cqww::CqWwContest;
-pub use cwt::CwtContest;
-pub use sweepstakes::SweepstakesContest;
-pub use types::{Contest, ContestType, Exchange};
+#[allow(unused_imports)]
+pub use callsign::{CallsignPool, FileCallsignSource};
+#[allow(unused_imports)]
+pub use types::{
+    normalize_exchange_input, CallsignSource, Contest, ContestDescriptor, Exchange, ExchangeField,
+    FieldKind, SettingField, SettingFieldGroup, SettingFieldKind, ValidationResult,
+};
 
-pub fn create_contest(contest_type: ContestType) -> Box<dyn Contest> {
-    match contest_type {
-        ContestType::CqWw => Box::new(CqWwContest::new()),
-        ContestType::Sweepstakes => Box::new(SweepstakesContest::new()),
-        ContestType::Cwt => Box::new(CwtContest::new()),
-    }
+include!(concat!(env!("OUT_DIR"), "/contest_registry.rs"));
+
+pub fn registry() -> Vec<ContestDescriptor> {
+    generated_contest_registry()
+}
+
+pub fn create_contest(id: &str) -> Option<Box<dyn Contest>> {
+    registry()
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .map(|entry| (entry.factory)())
+}
+
+pub fn default_contest_id() -> Option<&'static str> {
+    registry().first().map(|entry| entry.id)
 }

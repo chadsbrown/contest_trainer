@@ -5,14 +5,13 @@ use std::time::Instant;
 
 use crate::audio::AudioEngine;
 use crate::config::AppSettings;
-use crate::contest::ContestType;
-use crate::contest::{self, Contest};
+use crate::contest::{self, Contest, ContestDescriptor, FieldKind};
 use crate::cty::CtyDat;
 use crate::messages::{
     AudioCommand, AudioEvent, MessageSegment, MessageSegmentType, StationParams,
 };
 use crate::state::{ContestState, QsoContext, StationTxType, StatusColor, UserTxType};
-use crate::station::{CallerManager, CallerResponse, CallsignPool, CwtCallsignPool};
+use crate::station::{CallerManager, CallerResponse};
 use crate::stats::{QsoRecord, SessionStats};
 use crate::ui::{render_main_panel, render_settings_panel, render_stats_window, FileDialogTarget};
 
@@ -20,7 +19,7 @@ use crate::ui::{render_main_panel, render_settings_panel, render_stats_window, F
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum InputField {
     Callsign,
-    Exchange,
+    Exchange(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -71,7 +70,7 @@ pub struct ContestApp {
     pub context: QsoContext,
     pub score: Score,
     pub callsign_input: String,
-    pub exchange_input: String,
+    pub exchange_inputs: Vec<String>,
     pub current_field: InputField,
     pub last_qso_result: Option<QsoResult>,
 
@@ -81,7 +80,8 @@ pub struct ContestApp {
     audio_engine: Option<AudioEngine>,
 
     // Contest and station management
-    contest: Box<dyn Contest>,
+    pub contest: Box<dyn Contest>,
+    contest_registry: Vec<ContestDescriptor>,
     caller_manager: CallerManager,
     user_serial: u32,
     cty: CtyDat,
@@ -89,6 +89,8 @@ pub struct ContestApp {
     // UI state
     pub show_settings: bool,
     settings_changed: bool,
+    pub settings_notice: Option<String>,
+    pub last_exchange_field_index: usize,
 
     // Timing for caller spawning
     last_cq_finished: Option<Instant>,
@@ -112,7 +114,23 @@ pub struct ContestApp {
 
 impl ContestApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let settings = AppSettings::load_or_default();
+        let load_result = AppSettings::load_with_notice();
+        let mut settings = load_result.settings;
+        let settings_notice = load_result.notice;
+        let mut settings_changed = false;
+
+        let contest_registry = contest::registry();
+        let default_descriptor = contest_registry
+            .first()
+            .expect("No contests registered. Add at least one contest file.");
+        let active_descriptor = contest_registry
+            .iter()
+            .find(|entry| entry.id == settings.contest.active_contest_id)
+            .unwrap_or_else(|| {
+                settings.contest.active_contest_id = default_descriptor.id.to_string();
+                settings_changed = true;
+                default_descriptor
+            });
 
         // Create channels for audio communication
         let (cmd_tx, cmd_rx) = bounded::<AudioCommand>(64);
@@ -130,22 +148,26 @@ impl ContestApp {
         };
 
         // Create contest
-        let contest = contest::create_contest(settings.contest.contest_type);
+        let contest = (active_descriptor.factory)();
+        let needs_settings = !settings.contest.contests.contains_key(active_descriptor.id);
+        let contest_settings = settings.contest.settings_for_mut(contest.as_ref());
+        if needs_settings {
+            settings_changed = true;
+        }
 
         // Load CTY database for country lookups
         let cty_data = include_str!("../data/cty.dat");
         let cty = CtyDat::parse(cty_data);
 
-        // Load callsigns and create caller manager based on contest type
-        let caller_manager = if settings.contest.contest_type == ContestType::Cwt {
-            let cwt_callsigns = CwtCallsignPool::load(&settings.contest.cwt_callsign_file)
-                .unwrap_or_else(|_| CwtCallsignPool::default_pool());
-            CallerManager::new_cwt(cwt_callsigns, settings.simulation.clone())
-        } else {
-            let callsigns = CallsignPool::load(&settings.contest.callsign_file)
-                .unwrap_or_else(|_| CallsignPool::default_pool());
-            CallerManager::new(callsigns, settings.simulation.clone())
-        };
+        // Load callsigns and create caller manager
+        let callsign_source = contest
+            .callsign_source(contest_settings)
+            .unwrap_or_else(|_| {
+                contest
+                    .callsign_source(&contest.default_settings())
+                    .expect("Failed to build callsign source")
+            });
+        let caller_manager = CallerManager::new(callsign_source, settings.simulation.clone());
 
         let noise_enabled = settings.audio.noise_level > 0.0;
         let saved_noise_level = settings.audio.noise_level;
@@ -156,18 +178,25 @@ impl ContestApp {
             context: QsoContext::new(),
             score: Score::default(),
             callsign_input: String::new(),
-            exchange_input: String::new(),
+            exchange_inputs: contest
+                .exchange_fields()
+                .iter()
+                .map(|field| field.default_value.unwrap_or("").to_string())
+                .collect(),
             current_field: InputField::Callsign,
             last_qso_result: None,
             cmd_tx,
             event_rx,
             audio_engine,
             contest,
+            contest_registry,
             caller_manager,
             user_serial: 1,
             cty,
             show_settings: false,
-            settings_changed: false,
+            settings_changed,
+            settings_notice,
+            last_exchange_field_index: 0,
             last_cq_finished: None,
             noise_enabled,
             saved_noise_level,
@@ -213,7 +242,15 @@ impl ContestApp {
     }
 
     fn send_cq(&mut self) {
-        let cq_prefix = self.settings.contest.cq_message.trim();
+        let cq_prefix = self
+            .contest
+            .cq_message(
+                self.settings
+                    .contest
+                    .settings_for_mut(self.contest.as_ref()),
+            )
+            .trim()
+            .to_string();
         let callsign = self.settings.user.callsign.trim();
         let message = format!("{} {}", cq_prefix, callsign);
         let wpm = self.settings.user.wpm;
@@ -239,14 +276,16 @@ impl ContestApp {
 
     fn send_exchange(&mut self, their_call: &str) {
         self.context.awaiting_user_exchange = false;
-
-        let exchange = self.contest.user_exchange(
+        let contest_settings = self
+            .settings
+            .contest
+            .settings_for_mut(self.contest.as_ref());
+        let exchange_fields = self.contest.user_exchange_fields(
             &self.settings.user.callsign,
             self.user_serial,
-            self.settings.user.zone,
-            &self.settings.user.section,
-            &self.settings.user.name,
+            contest_settings,
         );
+        let exchange = self.contest.format_user_exchange(&exchange_fields);
 
         let wpm = self.settings.user.wpm;
 
@@ -270,14 +309,16 @@ impl ContestApp {
 
     fn send_exchange_only(&mut self) {
         self.context.awaiting_user_exchange = false;
-
-        let exchange = self.contest.user_exchange(
+        let contest_settings = self
+            .settings
+            .contest
+            .settings_for_mut(self.contest.as_ref());
+        let exchange_fields = self.contest.user_exchange_fields(
             &self.settings.user.callsign,
             self.user_serial,
-            self.settings.user.zone,
-            &self.settings.user.section,
-            &self.settings.user.name,
+            contest_settings,
         );
+        let exchange = self.contest.format_user_exchange(&exchange_fields);
 
         let wpm = self.settings.user.wpm;
 
@@ -323,6 +364,95 @@ impl ContestApp {
         let _ = self
             .cmd_tx
             .send(AudioCommand::PlayUserMessageSegmented { segments, wpm });
+    }
+
+    fn clear_exchange_inputs(&mut self) {
+        self.exchange_inputs = self.exchange_default_values();
+    }
+
+    fn reset_exchange_inputs(&mut self) {
+        self.exchange_inputs = self.exchange_default_values();
+        if self.exchange_inputs.is_empty() {
+            self.last_exchange_field_index = 0;
+        } else if self.last_exchange_field_index >= self.exchange_inputs.len() {
+            self.last_exchange_field_index = self.exchange_inputs.len() - 1;
+        }
+    }
+
+    fn set_exchange_field(&mut self, index: usize) {
+        if self.exchange_inputs.is_empty() {
+            self.current_field = InputField::Callsign;
+            return;
+        }
+        let index = index.min(self.exchange_inputs.len() - 1);
+        self.last_exchange_field_index = index;
+        self.current_field = InputField::Exchange(index);
+    }
+
+    fn advance_field_forward(&mut self) {
+        match self.current_field {
+            InputField::Callsign => {
+                if !self.exchange_inputs.is_empty() {
+                    self.set_exchange_field(0);
+                }
+            }
+            InputField::Exchange(index) => {
+                let next = index + 1;
+                if next < self.exchange_inputs.len() {
+                    self.set_exchange_field(next);
+                } else {
+                    self.current_field = InputField::Callsign;
+                }
+            }
+        }
+    }
+
+    fn advance_field_backward(&mut self) {
+        match self.current_field {
+            InputField::Callsign => {
+                if !self.exchange_inputs.is_empty() {
+                    self.set_exchange_field(self.exchange_inputs.len() - 1);
+                }
+            }
+            InputField::Exchange(index) => {
+                if index > 0 {
+                    self.set_exchange_field(index - 1);
+                } else {
+                    self.current_field = InputField::Callsign;
+                }
+            }
+        }
+    }
+
+    fn normalized_exchange_inputs(&self) -> Vec<String> {
+        let field_defs = self.contest.exchange_fields();
+        self.exchange_inputs
+            .iter()
+            .enumerate()
+            .map(|(idx, value)| {
+                let kind = field_defs
+                    .get(idx)
+                    .map(|field| field.kind)
+                    .unwrap_or(FieldKind::Text);
+                contest::normalize_exchange_input(value, kind)
+            })
+            .collect()
+    }
+
+    pub fn exchange_default_values(&self) -> Vec<String> {
+        self.contest
+            .exchange_fields()
+            .iter()
+            .map(|field| field.default_value.unwrap_or("").to_string())
+            .collect()
+    }
+
+    fn exchange_focus_index(&self) -> usize {
+        self.contest
+            .exchange_fields()
+            .iter()
+            .position(|field| field.focus_on_enter)
+            .unwrap_or(0)
     }
 
     /// Calculate similarity between two strings (0.0 to 1.0)
@@ -506,16 +636,16 @@ impl ContestApp {
             self.state = ContestState::UserTransmitting {
                 tx_type: UserTxType::Exchange,
             };
-            self.current_field = InputField::Exchange;
+            self.set_exchange_field(self.exchange_focus_index());
         }
     }
 
     fn handle_exchange_submit(&mut self) {
-        let entered_exchange = self.exchange_input.trim().to_uppercase();
+        let entered_fields = self.normalized_exchange_inputs();
         let entered_callsign = self.callsign_input.trim().to_uppercase();
 
         // User has entered an exchange, so they've "received" it
-        if !entered_exchange.is_empty() {
+        if entered_fields.iter().any(|field| !field.is_empty()) {
             self.context.progress.received_their_exchange = true;
         }
 
@@ -536,13 +666,19 @@ impl ContestApp {
         }
 
         // Validate the entry
-        let expected_exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
+        let expected_exchange_str = self.contest.format_exchange(&caller.params.exchange);
+        let contest_settings = self
+            .settings
+            .contest
+            .settings_for_mut(self.contest.as_ref());
         let validation = self.contest.validate(
             &caller.params.callsign,
             &caller.params.exchange,
             &entered_callsign,
-            &entered_exchange,
+            &entered_fields,
+            contest_settings,
         );
+        let entered_exchange = self.contest.format_received_exchange(&entered_fields);
 
         let result = QsoResult {
             callsign: entered_callsign.clone(),
@@ -582,7 +718,7 @@ impl ContestApp {
 
         // Clear inputs and reset correction state
         self.callsign_input.clear();
-        self.exchange_input.clear();
+        self.clear_exchange_inputs();
         self.current_field = InputField::Callsign;
         self.context.end_correction();
     }
@@ -754,8 +890,13 @@ impl ContestApp {
 
     /// Try to spawn a tail-ender after TU
     fn try_spawn_tail_ender(&mut self) {
+        let contest_settings = self
+            .settings
+            .contest
+            .settings_for_mut(self.contest.as_ref());
         let tail_ender = self.caller_manager.try_spawn_tail_ender(
             self.contest.as_ref(),
+            contest_settings,
             Some(&self.settings.user.callsign),
             Some(&self.cty),
         );
@@ -930,7 +1071,7 @@ impl ContestApp {
                     };
                 } else {
                     // Normal flow - send their exchange
-                    let exchange_str = self.contest.format_sent_exchange(&caller.params.exchange);
+                    let exchange_str = self.contest.format_exchange(&caller.params.exchange);
 
                     let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
                         id: caller.params.id,
@@ -968,8 +1109,13 @@ impl ContestApp {
         }
 
         // Get callers from the persistent queue
+        let contest_settings = self
+            .settings
+            .contest
+            .settings_for_mut(self.contest.as_ref());
         let responding = self.caller_manager.on_cq_complete(
             self.contest.as_ref(),
+            contest_settings,
             Some(&self.settings.user.callsign),
             Some(&self.cty),
         );
@@ -995,7 +1141,7 @@ impl ContestApp {
                 let _ = self.cmd_tx.send(AudioCommand::StopAll);
                 self.caller_manager.on_cq_restart();
                 self.callsign_input.clear();
-                self.exchange_input.clear();
+                self.clear_exchange_inputs();
                 self.current_field = InputField::Callsign;
                 self.send_cq();
             }
@@ -1032,7 +1178,7 @@ impl ContestApp {
             // F12 - Wipe
             if i.key_pressed(Key::F12) {
                 self.callsign_input.clear();
-                self.exchange_input.clear();
+                self.clear_exchange_inputs();
                 self.current_field = InputField::Callsign;
             }
 
@@ -1055,14 +1201,14 @@ impl ContestApp {
                             let _ = self.cmd_tx.send(AudioCommand::StopAll);
                             self.caller_manager.on_cq_restart();
                             self.callsign_input.clear();
-                            self.exchange_input.clear();
+                            self.clear_exchange_inputs();
                             self.current_field = InputField::Callsign;
                             self.send_cq();
                         } else {
                             self.handle_callsign_submit();
                         }
                     }
-                    InputField::Exchange => {
+                    InputField::Exchange(_) => {
                         self.handle_exchange_submit();
                     }
                 }
@@ -1073,29 +1219,65 @@ impl ContestApp {
                 let _ = self.cmd_tx.send(AudioCommand::StopAll);
             }
 
+            // Space - advance exchange field (contest logger convention)
+            if i.key_pressed(Key::Space) {
+                if i.modifiers.shift {
+                    self.advance_field_backward();
+                } else {
+                    self.advance_field_forward();
+                }
+            }
+
             // Tab - Switch fields
             if i.key_pressed(Key::Tab) {
-                self.current_field = match self.current_field {
-                    InputField::Callsign => InputField::Exchange,
-                    InputField::Exchange => InputField::Callsign,
-                };
+                if i.modifiers.shift {
+                    self.advance_field_backward();
+                } else {
+                    self.advance_field_forward();
+                }
             }
         });
     }
 
     fn apply_settings_changes(&mut self) {
         if self.settings_changed {
-            self.contest = contest::create_contest(self.settings.contest.contest_type);
-
-            if self.settings.contest.contest_type == ContestType::Cwt {
-                let cwt_callsigns = CwtCallsignPool::load(&self.settings.contest.cwt_callsign_file)
-                    .unwrap_or_else(|_| CwtCallsignPool::default_pool());
-                self.caller_manager.update_cwt_callsigns(cwt_callsigns);
+            let active_id = self.settings.contest.active_contest_id.clone();
+            let default_descriptor = self
+                .contest_registry
+                .first()
+                .expect("No contests registered. Add at least one contest file.");
+            let active_descriptor = if let Some(entry) = self
+                .contest_registry
+                .iter()
+                .find(|entry| entry.id == active_id)
+            {
+                entry
             } else {
-                let callsigns = CallsignPool::load(&self.settings.contest.callsign_file)
-                    .unwrap_or_else(|_| CallsignPool::default_pool());
-                self.caller_manager.update_callsigns(callsigns);
+                self.settings.contest.active_contest_id = default_descriptor.id.to_string();
+                default_descriptor
+            };
+
+            if active_descriptor.id != self.contest.id() {
+                self.contest = (active_descriptor.factory)();
+                self.reset_exchange_inputs();
+                self.callsign_input.clear();
+                self.clear_exchange_inputs();
+                self.current_field = InputField::Callsign;
             }
+
+            let contest_settings = self
+                .settings
+                .contest
+                .settings_for_mut(self.contest.as_ref());
+            let callsign_source = self
+                .contest
+                .callsign_source(contest_settings)
+                .unwrap_or_else(|_| {
+                    self.contest
+                        .callsign_source(&self.contest.default_settings())
+                        .expect("Failed to build callsign source")
+                });
+            self.caller_manager.update_callsigns(callsign_source);
 
             self.caller_manager
                 .update_settings(self.settings.simulation.clone());
@@ -1165,6 +1347,7 @@ impl eframe::App for ContestApp {
             let show_settings = &mut self.show_settings;
             let file_dialog = &mut self.file_dialog;
             let file_dialog_target = &mut self.file_dialog_target;
+            let contest_registry = &self.contest_registry;
 
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("settings_viewport"),
@@ -1176,26 +1359,49 @@ impl eframe::App for ContestApp {
 
                     if let Some(path) = file_dialog.take_picked() {
                         if let Some(path_str) = path.to_str() {
-                            match file_dialog_target {
-                                Some(FileDialogTarget::CallsignFile) => {
-                                    settings.contest.callsign_file = path_str.to_string();
-                                    *settings_changed = true;
+                            if let Some(target) = file_dialog_target.take() {
+                                match target {
+                                    FileDialogTarget::ContestSetting { contest_id, key } => {
+                                        let entry = settings
+                                            .contest
+                                            .contests
+                                            .entry(contest_id)
+                                            .or_insert_with(|| {
+                                                toml::Value::Table(toml::value::Table::new())
+                                            });
+                                        if let toml::Value::Table(table) = entry {
+                                            table.insert(
+                                                key,
+                                                toml::Value::String(path_str.to_string()),
+                                            );
+                                            *settings_changed = true;
+                                        }
+                                    }
                                 }
-                                Some(FileDialogTarget::CwtCallsignFile) => {
-                                    settings.contest.cwt_callsign_file = path_str.to_string();
-                                    *settings_changed = true;
-                                }
-                                None => {}
                             }
-                            *file_dialog_target = None;
                         }
                     }
 
                     egui::CentralPanel::default().show(ctx, |ui| {
+                        let default_descriptor = contest_registry
+                            .first()
+                            .expect("No contests registered. Add at least one contest file.");
+                        let active_descriptor = contest_registry
+                            .iter()
+                            .find(|entry| entry.id == settings.contest.active_contest_id)
+                            .unwrap_or_else(|| {
+                                settings.contest.active_contest_id =
+                                    default_descriptor.id.to_string();
+                                *settings_changed = true;
+                                default_descriptor
+                            });
+                        let contest_for_settings = (active_descriptor.factory)();
                         render_settings_panel(
                             ui,
                             settings,
                             settings_changed,
+                            contest_registry,
+                            contest_for_settings.as_ref(),
                             file_dialog,
                             file_dialog_target,
                         );

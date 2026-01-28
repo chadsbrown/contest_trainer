@@ -1,9 +1,9 @@
 use rand::Rng;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use super::callsign::{CallsignPool, CwtCallsignPool};
 use crate::config::{PileupSettings, SimulationSettings};
-use crate::contest::{Contest, Exchange};
+use crate::contest::{CallsignSource, Contest};
 use crate::cty::CtyDat;
 use crate::messages::{StationId, StationParams};
 use crate::state::{QsoContext, QsoProgress};
@@ -48,26 +48,6 @@ impl CallerResponse {
         }
 
         Self::from_progress(progress)
-    }
-}
-
-/// Source of callsigns - either regular or CWT-specific
-pub enum CallsignSource {
-    Regular(CallsignPool),
-    Cwt(CwtCallsignPool),
-}
-
-impl CallsignSource {
-    /// Get a random callsign and exchange
-    pub fn random(&mut self, contest: &dyn Contest, serial: u32) -> Option<(String, Exchange)> {
-        match self {
-            CallsignSource::Regular(pool) => {
-                let callsign = pool.random()?;
-                let exchange = contest.generate_exchange(&callsign, serial);
-                Some((callsign, exchange))
-            }
-            CallsignSource::Cwt(pool) => pool.random(),
-        }
     }
 }
 
@@ -137,7 +117,7 @@ impl PersistentCaller {
 
 /// Manages a persistent queue of callers
 pub struct CallerManager {
-    callsigns: CallsignSource,
+    callsigns: Box<dyn CallsignSource>,
     settings: SimulationSettings,
     pileup_settings: PileupSettings,
     next_id: u32,
@@ -154,24 +134,10 @@ pub struct CallerManager {
 }
 
 impl CallerManager {
-    pub fn new(callsigns: CallsignPool, settings: SimulationSettings) -> Self {
+    pub fn new(callsigns: Box<dyn CallsignSource>, settings: SimulationSettings) -> Self {
         let pileup_settings = settings.pileup.clone();
         Self {
-            callsigns: CallsignSource::Regular(callsigns),
-            settings,
-            pileup_settings,
-            next_id: 0,
-            serial_counter: 1,
-            queue: Vec::new(),
-            active_ids: Vec::new(),
-            last_replenish: Instant::now(),
-        }
-    }
-
-    pub fn new_cwt(callsigns: CwtCallsignPool, settings: SimulationSettings) -> Self {
-        let pileup_settings = settings.pileup.clone();
-        Self {
-            callsigns: CallsignSource::Cwt(callsigns),
+            callsigns,
             settings,
             pileup_settings,
             next_id: 0,
@@ -189,16 +155,8 @@ impl CallerManager {
     }
 
     /// Update callsign pool (regular)
-    pub fn update_callsigns(&mut self, callsigns: CallsignPool) {
-        self.callsigns = CallsignSource::Regular(callsigns);
-        // Clear queue when callsigns change
-        self.queue.clear();
-        self.active_ids.clear();
-    }
-
-    /// Update callsign pool (CWT)
-    pub fn update_cwt_callsigns(&mut self, callsigns: CwtCallsignPool) {
-        self.callsigns = CallsignSource::Cwt(callsigns);
+    pub fn update_callsigns(&mut self, callsigns: Box<dyn CallsignSource>) {
+        self.callsigns = callsigns;
         // Clear queue when callsigns change
         self.queue.clear();
         self.active_ids.clear();
@@ -208,6 +166,7 @@ impl CallerManager {
     fn replenish_queue(
         &mut self,
         contest: &dyn Contest,
+        contest_settings: &toml::Value,
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) {
@@ -237,7 +196,8 @@ impl CallerManager {
                 break;
             }
 
-            if let Some(caller) = self.create_caller(contest, user_callsign, cty) {
+            if let Some(caller) = self.create_caller(contest, contest_settings, user_callsign, cty)
+            {
                 self.queue.push(caller);
             } else {
                 break;
@@ -249,6 +209,7 @@ impl CallerManager {
     fn create_caller(
         &mut self,
         contest: &dyn Contest,
+        contest_settings: &toml::Value,
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) -> Option<PersistentCaller> {
@@ -259,7 +220,9 @@ impl CallerManager {
         let mut callsign_and_exchange = None;
 
         for _ in 0..max_retries {
-            let Some((callsign, exchange)) = self.callsigns.random(contest, self.serial_counter)
+            let Some((callsign, exchange)) =
+                self.callsigns
+                    .random(contest, self.serial_counter, contest_settings)
             else {
                 break;
             };
@@ -326,13 +289,14 @@ impl CallerManager {
     pub fn on_cq_complete(
         &mut self,
         contest: &dyn Contest,
+        contest_settings: &toml::Value,
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) -> Vec<StationParams> {
         let mut rng = rand::thread_rng();
 
         // First, replenish the queue
-        self.replenish_queue(contest, user_callsign, cty);
+        self.replenish_queue(contest, contest_settings, user_callsign, cty);
 
         // Clean up worked/given-up callers
         self.queue
@@ -345,9 +309,13 @@ impl CallerManager {
         let mut responding: Vec<StationParams> = Vec::new();
         let max_callers = self.settings.max_simultaneous_stations as usize;
 
-        // Sort by reaction time (faster operators first)
+        // Sort by reaction time with a stable random jitter (precomputed)
+        let mut jitter: HashMap<StationId, u32> = HashMap::new();
+        for caller in &self.queue {
+            jitter.insert(caller.params.id, rng.gen_range(0..100));
+        }
         self.queue
-            .sort_by_key(|c| c.reaction_delay_ms + rng.gen_range(0..100));
+            .sort_by_key(|c| c.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0));
 
         for caller in &mut self.queue {
             if responding.len() >= max_callers {
@@ -413,6 +381,7 @@ impl CallerManager {
     pub fn try_spawn_tail_ender(
         &mut self,
         contest: &dyn Contest,
+        contest_settings: &toml::Value,
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) -> Option<StationParams> {
@@ -424,7 +393,7 @@ impl CallerManager {
         }
 
         // Replenish queue first
-        self.replenish_queue(contest, user_callsign, cty);
+        self.replenish_queue(contest, contest_settings, user_callsign, cty);
 
         // Clean up worked/given-up callers
         self.queue

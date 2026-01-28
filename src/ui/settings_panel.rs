@@ -1,19 +1,20 @@
 use crate::config::AppSettings;
-use crate::contest::ContestType;
-use egui::RichText;
+use crate::contest::{Contest, ContestDescriptor, SettingFieldGroup, SettingFieldKind};
+use egui::{RichText, Vec2};
 use egui_file_dialog::FileDialog;
 
 /// Tracks which file field triggered the file dialog
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum FileDialogTarget {
-    CallsignFile,
-    CwtCallsignFile,
+    ContestSetting { contest_id: String, key: String },
 }
 
 pub fn render_settings_panel(
     ui: &mut egui::Ui,
     settings: &mut AppSettings,
     settings_changed: &mut bool,
+    contest_registry: &[ContestDescriptor],
+    active_contest: &dyn Contest,
     file_dialog: &mut FileDialog,
     file_dialog_target: &mut Option<FileDialogTarget>,
 ) {
@@ -29,35 +30,6 @@ pub fn render_settings_panel(
                         .changed()
                     {
                         settings.user.callsign = settings.user.callsign.to_uppercase();
-                        *settings_changed = true;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Your Name:");
-                    if ui.text_edit_singleline(&mut settings.user.name).changed() {
-                        settings.user.name = settings.user.name.to_uppercase();
-                        *settings_changed = true;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("CQ Zone:");
-                    if ui
-                        .add(egui::DragValue::new(&mut settings.user.zone).range(1..=40))
-                        .changed()
-                    {
-                        *settings_changed = true;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Section/Exchange:");
-                    if ui
-                        .text_edit_singleline(&mut settings.user.section)
-                        .changed()
-                    {
-                        settings.user.section = settings.user.section.to_uppercase();
                         *settings_changed = true;
                     }
                 });
@@ -112,78 +84,41 @@ pub fn render_settings_panel(
                 ui.horizontal(|ui| {
                     ui.label("Contest Type:");
                     egui::ComboBox::from_id_salt("contest_type")
-                        .selected_text(format!("{:?}", settings.contest.contest_type))
+                        .selected_text(active_contest.display_name())
                         .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_value(
-                                    &mut settings.contest.contest_type,
-                                    ContestType::CqWw,
-                                    "CQ World Wide",
-                                )
-                                .changed()
-                            {
-                                *settings_changed = true;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut settings.contest.contest_type,
-                                    ContestType::Sweepstakes,
-                                    "ARRL Sweepstakes",
-                                )
-                                .changed()
-                            {
-                                *settings_changed = true;
-                            }
-                            if ui
-                                .selectable_value(
-                                    &mut settings.contest.contest_type,
-                                    ContestType::Cwt,
-                                    "CWT",
-                                )
-                                .changed()
-                            {
-                                *settings_changed = true;
+                            for contest in contest_registry {
+                                if ui
+                                    .selectable_value(
+                                        &mut settings.contest.active_contest_id,
+                                        contest.id.to_string(),
+                                        contest.display_name,
+                                    )
+                                    .changed()
+                                {
+                                    *settings_changed = true;
+                                }
                             }
                         });
                 });
+            });
 
-                ui.horizontal(|ui| {
-                    ui.label("Callsign File:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut settings.contest.callsign_file)
-                            .interactive(false)
-                            .desired_width(250.0),
-                    );
-                    if ui.button("Browse...").clicked() {
-                        *file_dialog_target = Some(FileDialogTarget::CallsignFile);
-                        file_dialog.pick_file();
-                    }
-                });
+        ui.add_space(8.0);
 
-                if settings.contest.contest_type == ContestType::Cwt {
-                    ui.horizontal(|ui| {
-                        ui.label("CWT Callsign File:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut settings.contest.cwt_callsign_file)
-                                .interactive(false)
-                                .desired_width(250.0),
-                        );
-                        if ui.button("Browse...").clicked() {
-                            *file_dialog_target = Some(FileDialogTarget::CwtCallsignFile);
-                            file_dialog.pick_file();
-                        }
-                    });
-                }
-
-                ui.horizontal(|ui| {
-                    ui.label("CQ Message:");
-                    if ui
-                        .text_edit_singleline(&mut settings.contest.cq_message)
-                        .changed()
-                    {
-                        *settings_changed = true;
-                    }
-                });
+        // Contest-specific settings
+        egui::CollapsingHeader::new(RichText::new("Active Contest").strong())
+            .default_open(true)
+            .show(ui, |ui| {
+                let contest_id = settings.contest.active_contest_id.clone();
+                let contest_settings = settings.contest.settings_for_mut(active_contest);
+                render_contest_settings(
+                    ui,
+                    active_contest,
+                    contest_settings,
+                    settings_changed,
+                    file_dialog,
+                    file_dialog_target,
+                    &contest_id,
+                );
             });
 
         ui.add_space(8.0);
@@ -530,4 +465,123 @@ pub fn render_settings_panel(
                 }
             });
     });
+}
+
+fn render_contest_settings(
+    ui: &mut egui::Ui,
+    contest: &dyn Contest,
+    contest_settings: &mut toml::Value,
+    settings_changed: &mut bool,
+    file_dialog: &mut FileDialog,
+    file_dialog_target: &mut Option<FileDialogTarget>,
+    contest_id: &str,
+) {
+    let mut contest_fields = Vec::new();
+    let mut user_fields = Vec::new();
+
+    for field in contest.settings_fields() {
+        match field.group {
+            SettingFieldGroup::Contest => contest_fields.push(field),
+            SettingFieldGroup::UserExchange => user_fields.push(field),
+        }
+    }
+
+    if !contest_fields.is_empty() {
+        ui.label(RichText::new("Contest").strong());
+        render_setting_group(
+            ui,
+            &contest_fields,
+            contest_settings,
+            settings_changed,
+            file_dialog,
+            file_dialog_target,
+            contest_id,
+        );
+        ui.add_space(6.0);
+    }
+
+    if !user_fields.is_empty() {
+        ui.label(RichText::new("Your Exchange").strong());
+        render_setting_group(
+            ui,
+            &user_fields,
+            contest_settings,
+            settings_changed,
+            file_dialog,
+            file_dialog_target,
+            contest_id,
+        );
+    }
+}
+
+fn render_setting_group(
+    ui: &mut egui::Ui,
+    fields: &[crate::contest::SettingField],
+    contest_settings: &mut toml::Value,
+    settings_changed: &mut bool,
+    file_dialog: &mut FileDialog,
+    file_dialog_target: &mut Option<FileDialogTarget>,
+    contest_id: &str,
+) {
+    let table = contest_settings_table(contest_settings);
+
+    for field in fields {
+        ui.horizontal(|ui| {
+            ui.label(field.label);
+            match field.kind {
+                SettingFieldKind::FilePath => {
+                    let value = table
+                        .get(field.key)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let mut display_value = value.clone();
+                    ui.add(
+                        egui::TextEdit::singleline(&mut display_value)
+                            .interactive(false)
+                            .desired_width(250.0),
+                    );
+                    if ui.button("Browse...").clicked() {
+                        *file_dialog_target = Some(FileDialogTarget::ContestSetting {
+                            contest_id: contest_id.to_string(),
+                            key: field.key.to_string(),
+                        });
+                        file_dialog.pick_file();
+                    }
+                }
+                SettingFieldKind::Text => {
+                    let width_px = setting_field_width(ui, field.width_chars);
+                    let mut value = table
+                        .get(field.key)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let response = ui.add_sized(
+                        Vec2::new(width_px, 24.0),
+                        egui::TextEdit::singleline(&mut value).hint_text(field.placeholder),
+                    );
+                    if response.changed() {
+                        value = value.to_uppercase();
+                        table.insert(field.key.to_string(), toml::Value::String(value));
+                        *settings_changed = true;
+                    }
+                }
+            }
+        });
+    }
+}
+
+fn contest_settings_table(settings: &mut toml::Value) -> &mut toml::value::Table {
+    if !settings.is_table() {
+        *settings = toml::Value::Table(toml::value::Table::new());
+    }
+    settings
+        .as_table_mut()
+        .expect("contest settings must be a table")
+}
+
+fn setting_field_width(ui: &egui::Ui, width_chars: u8) -> f32 {
+    let font_size = ui.text_style_height(&egui::TextStyle::Body);
+    let char_width = (font_size * 0.6).max(6.0);
+    char_width * width_chars as f32 + 8.0
 }
