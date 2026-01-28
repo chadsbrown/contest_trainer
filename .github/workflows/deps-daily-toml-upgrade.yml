@@ -1,0 +1,37 @@
+name: Deps Daily (Cargo.toml upgrade, incompatible)
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Deps Daily (Cargo.toml upgrade, incompatible)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
+
+      - name: Upgrade Cargo.toml dependencies
+        run: cargo upgrade --incompatible --all --workspace
+
+      - name: Update lockfile
+        run: cargo update
+
+      - name: Build
+        run: cargo check
