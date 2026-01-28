@@ -99,6 +99,60 @@ Each contest owns its callsign parsing:
 `callsign_source()` should return a usable source even if the file is missing
 or invalid (e.g., by falling back to a small default pool).
 
+### Example: Custom Callsign Parser
+
+Below is a minimal custom parser that reads `callsign,name,number` CSV lines
+and implements `CallsignSource`:
+
+```rust
+struct MyCallsignSource {
+    stations: Vec<(String, String, String)>,
+    used: std::collections::HashSet<String>,
+}
+
+impl MyCallsignSource {
+    fn load<P: AsRef<std::path::Path>>(path: P) -> Result<Self, std::io::Error> {
+        let content = std::fs::read_to_string(path)?;
+        let stations = content
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split(',').map(|f| f.trim()).collect();
+                if fields.len() >= 3 {
+                    let callsign = fields[0].to_uppercase();
+                    let name = fields[1].to_uppercase();
+                    let number = fields[2].to_uppercase();
+                    if !callsign.is_empty() && !name.is_empty() && !number.is_empty() {
+                        return Some((callsign, name, number));
+                    }
+                }
+                None
+            })
+            .collect();
+        Ok(Self {
+            stations,
+            used: std::collections::HashSet::new(),
+        })
+    }
+}
+
+impl CallsignSource for MyCallsignSource {
+    fn random(
+        &mut self,
+        _contest: &dyn Contest,
+        _serial: u32,
+        _settings: &toml::Value,
+    ) -> Option<(String, Exchange)> {
+        let station = self.stations.pop()?;
+        Some((
+            station.0.clone(),
+            Exchange::new(vec![station.1.clone(), station.2.clone()]),
+        ))
+    }
+}
+```
+
 ## Config Behavior
 
 If an existing `settings.toml` is incompatible with the current schema, the
