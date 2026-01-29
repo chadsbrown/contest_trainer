@@ -1,8 +1,8 @@
-name: Deps Daily (lockfile only)
+name: Deps Weekly (lockfile only)
 
 on:
   schedule:
-    - cron: "0 7 * * *"
+    - cron: "0 7 * * 1"
   workflow_dispatch:
 
 env:
@@ -10,7 +10,7 @@ env:
 
 jobs:
   build:
-    name: Deps Daily (lockfile only)
+    name: Deps Weekly (lockfile only)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
