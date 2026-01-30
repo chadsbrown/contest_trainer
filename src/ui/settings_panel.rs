@@ -566,6 +566,28 @@ fn render_setting_group(
                         *settings_changed = true;
                     }
                 }
+                SettingFieldKind::Integer { min, max } => {
+                    let width_px = setting_field_width(ui, field.width_chars);
+                    let mut value = table
+                        .get(field.key)
+                        .and_then(|v| v.as_integer())
+                        .or_else(|| {
+                            table
+                                .get(field.key)
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.trim().parse::<i64>().ok())
+                        })
+                        .unwrap_or(min);
+                    let response = ui.add_sized(
+                        Vec2::new(width_px, 24.0),
+                        egui::DragValue::new(&mut value).range(min..=max),
+                    );
+                    if response.changed() {
+                        let clamped = value.clamp(min, max);
+                        table.insert(field.key.to_string(), toml::Value::Integer(clamped));
+                        *settings_changed = true;
+                    }
+                }
             }
         });
     }

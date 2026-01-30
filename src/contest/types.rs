@@ -68,6 +68,7 @@ impl ExchangeField {
 pub enum SettingFieldKind {
     Text,
     FilePath,
+    Integer { min: i64, max: i64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

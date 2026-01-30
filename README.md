@@ -25,7 +25,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 ## Features
 
 - **Multi-platform Support**: Run on Windows, macOS, and Linux
-- **Multiple Contest Types**: Practice for CWT (default), CQ World Wide, ARRL Sweepstakes, and ARRL DX CW
+- **Multiple Contest Types**: Practice for CWT (default), CQ World Wide, CQ WPX, ARRL Sweepstakes, and ARRL DX CW
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
 - **Multiple Simultaneous Callers**: Handle pileups with multiple stations calling at once
 - **Background Noise**: Adjustable noise level to simulate real band conditions
@@ -81,9 +81,10 @@ Access settings via File > Settings. The settings window opens as a separate win
 
 ### Contest Settings
 
-- **Contest Type**: Select from CWT, CQ World Wide, ARRL Sweepstakes, or ARRL DX CW
+- **Contest Type**: Select from CWT, CQ World Wide, CQ WPX, ARRL Sweepstakes, or ARRL DX CW
 - **CQ Message**: Your CQ message (default: "CQ TEST")
 - **Callsign File**: Per-contest callsign file used by the selected contest (if applicable)
+- **Serial Range (CQ WPX)**: Minimum/maximum serial number used by callers (1-12000, default 1000-2500)
 
 ### Simulation Settings
 

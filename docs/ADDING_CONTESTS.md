@@ -84,6 +84,10 @@ Use the `group` to choose where the field appears:
 - `SettingFieldGroup::Contest`
 - `SettingFieldGroup::UserExchange`
 
+Settings support `SettingFieldKind::Text`, `SettingFieldKind::FilePath`, and
+`SettingFieldKind::Integer { min, max }`. Integer fields are rendered with an
+integer input and are clamped to the provided range.
+
 All settings are stored under `contest.contests.<id>` in `settings.toml`. The
 default values come from `default_settings()`.
 
@@ -158,6 +162,10 @@ impl CallsignSource for MyCallsignSource {
 If an existing `settings.toml` is incompatible with the current schema, the
 app renames it to `settings.toml.bak.<timestamp>` and writes defaults.
 
+If a contest’s `validate_settings()` returns an error, the app shows a modal
+warning and blocks simulation until the settings are corrected. Invalid values
+are no longer silently reset to defaults.
+
 ## Minimal Example
 
 ```rust
@@ -218,4 +226,17 @@ impl Contest for ExampleContest {
         }
     }
 }
+```
+
+### Example: Integer Settings Field
+
+```rust
+SettingField {
+    key: "serial_min",
+    label: "Serial Min",
+    placeholder: "1000",
+    width_chars: 5,
+    kind: SettingFieldKind::Integer { min: 1, max: 12000 },
+    group: SettingFieldGroup::Contest,
+},
 ```

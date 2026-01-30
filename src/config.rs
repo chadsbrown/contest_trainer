@@ -251,10 +251,6 @@ impl ContestConfig {
         let defaults = contest.default_settings();
         merge_defaults(entry, defaults);
 
-        if contest.validate_settings(entry).is_err() {
-            *entry = contest.default_settings();
-        }
-
         entry
     }
 }

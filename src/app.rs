@@ -90,6 +90,7 @@ pub struct ContestApp {
     pub show_settings: bool,
     settings_changed: bool,
     pub settings_notice: Option<String>,
+    settings_error: Option<String>,
     pub last_exchange_field_index: usize,
 
     // Timing for caller spawning
@@ -154,6 +155,7 @@ impl ContestApp {
         if needs_settings {
             settings_changed = true;
         }
+        let settings_error = contest.validate_settings(contest_settings).err();
 
         // Load CTY database for country lookups
         let cty_data = include_str!("../data/cty.dat");
@@ -196,6 +198,7 @@ impl ContestApp {
             show_settings: false,
             settings_changed,
             settings_notice,
+            settings_error,
             last_exchange_field_index: 0,
             last_cq_finished: None,
             noise_enabled,
@@ -1092,6 +1095,9 @@ impl ContestApp {
         if self.state != ContestState::WaitingForCallers {
             return;
         }
+        if self.settings_error.is_some() {
+            return;
+        }
 
         // Wait a bit after CQ before callers respond
         if let Some(finished) = self.last_cq_finished {
@@ -1128,14 +1134,17 @@ impl ContestApp {
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
+            let settings_valid = self.settings_error.is_none();
             // F1 - Send CQ (always available)
             if i.key_pressed(Key::F1) {
-                let _ = self.cmd_tx.send(AudioCommand::StopAll);
-                self.caller_manager.on_cq_restart();
-                self.callsign_input.clear();
-                self.clear_exchange_inputs();
-                self.current_field = InputField::Callsign;
-                self.send_cq();
+                if settings_valid {
+                    let _ = self.cmd_tx.send(AudioCommand::StopAll);
+                    self.caller_manager.on_cq_restart();
+                    self.callsign_input.clear();
+                    self.clear_exchange_inputs();
+                    self.current_field = InputField::Callsign;
+                    self.send_cq();
+                }
             }
 
             // F2 - Send Exchange only (available in any state with active caller)
@@ -1261,6 +1270,7 @@ impl ContestApp {
                 .settings
                 .contest
                 .settings_for_mut(self.contest.as_ref());
+            self.settings_error = self.contest.validate_settings(contest_settings).err();
             let callsign_source = self
                 .contest
                 .callsign_source(contest_settings)
@@ -1415,6 +1425,18 @@ impl eframe::App for ContestApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             render_main_panel(ui, self);
         });
+
+        if let Some(error) = self.settings_error.clone() {
+            egui::Window::new("Invalid Contest Settings")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.label(error);
+                    ui.add_space(8.0);
+                    ui.label("Fix the contest settings to continue.");
+                });
+        }
 
         ctx.request_repaint();
     }
