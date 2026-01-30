@@ -126,10 +126,10 @@ These fields are defined by the selected contest and can vary by contest type.
 - **Default**: `28-36` WPM
 - **Values**: 10-50 WPM (min must be <= max)
 
-### Frequency Spread (Hz)
-- **Purpose**: How far off your frequency stations may call (simulates real band conditions)
-- **Default**: `400` Hz
-- **Values**: 0-1000 Hz
+### Filter Width (Hz)
+- **Purpose**: Total spread between calling stations (simulates real band conditions). Offsets are ± half the width.
+- **Default**: `300` Hz
+- **Values**: 100-500 Hz
 
 ### Signal Strength Range (Min/Max)
 - **Purpose**: Amplitude range for simulated station signals (simulates varying signal strengths)

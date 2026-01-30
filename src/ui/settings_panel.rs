@@ -176,12 +176,12 @@ pub fn render_settings_panel(
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label("Frequency Spread (Hz):");
+                    ui.label("Filter Width (Hz):");
                     if ui
                         .add(
                             egui::Slider::new(
                                 &mut settings.simulation.frequency_spread_hz,
-                                0.0..=1000.0,
+                                100.0..=500.0,
                             )
                             .fixed_decimals(0),
                         )

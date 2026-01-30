@@ -254,8 +254,8 @@ impl CallerManager {
 
         // Random parameters
         let wpm = rng.gen_range(self.settings.wpm_min..=self.settings.wpm_max);
-        let freq_offset =
-            rng.gen_range(-self.settings.frequency_spread_hz..self.settings.frequency_spread_hz);
+        let half_width = (self.settings.frequency_spread_hz / 2.0).max(0.0);
+        let freq_offset = rng.gen_range(-half_width..half_width);
         let amplitude = rng.gen_range(self.settings.amplitude_min..self.settings.amplitude_max);
 
         // Random patience (1-7 attempts)

@@ -13,6 +13,7 @@ pub struct QsoRecord {
     pub points: u32,
     pub used_agn_callsign: bool,
     pub used_agn_exchange: bool,
+    pub used_f5_callsign: bool,
 }
 
 /// Session statistics collector and analyzer
@@ -37,10 +38,29 @@ pub struct StatsAnalysis {
     pub avg_station_wpm: f32,
     pub min_station_wpm: u8,
     pub max_station_wpm: u8,
+    pub wpm_buckets: Vec<WpmBucketStat>,
+    pub streaks: StreakStats,
     pub char_error_rates: Vec<(char, f32, usize)>, // (char, error_rate, total_count)
     pub agn_callsign_count: usize,                 // QSOs where AGN was used for callsign
     pub agn_exchange_count: usize,                 // QSOs where AGN was used for exchange
     pub agn_any_count: usize,                      // QSOs where any AGN was used
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct StreakStats {
+    pub current_clean: usize,
+    pub max_clean: usize,
+    pub current_error: usize,
+    pub max_error: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct WpmBucketStat {
+    pub start_wpm: u8,
+    pub label: String,
+    pub total: usize,
+    pub correct: usize,
+    pub accuracy_pct: f32,
 }
 
 impl SessionStats {
@@ -81,6 +101,7 @@ impl SessionStats {
                     && q.exchange_correct
                     && !q.used_agn_callsign
                     && !q.used_agn_exchange
+                    && !q.used_f5_callsign
             })
             .count();
 
@@ -106,6 +127,9 @@ impl SessionStats {
         let min_station_wpm = *wpms.iter().min().unwrap_or(&0);
         let max_station_wpm = *wpms.iter().max().unwrap_or(&0);
 
+        let wpm_buckets = self.analyze_wpm_buckets(2);
+        let streaks = self.analyze_streaks();
+
         // Character error analysis
         let char_error_rates = self.analyze_character_errors();
 
@@ -123,6 +147,8 @@ impl SessionStats {
             avg_station_wpm,
             min_station_wpm,
             max_station_wpm,
+            wpm_buckets,
+            streaks,
             char_error_rates,
             agn_callsign_count,
             agn_exchange_count,
@@ -174,6 +200,65 @@ impl SessionStats {
         // Sort by error rate descending, then by character ascending for stable ordering
         results.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         results
+    }
+
+    fn analyze_wpm_buckets(&self, bucket_size: u8) -> Vec<WpmBucketStat> {
+        let mut buckets: HashMap<u8, (usize, usize)> = HashMap::new();
+
+        for qso in &self.qsos {
+            let bucket_start = (qso.station_wpm / bucket_size) * bucket_size;
+            let entry = buckets.entry(bucket_start).or_insert((0, 0));
+            entry.0 += 1;
+            if qso.callsign_correct && qso.exchange_correct {
+                entry.1 += 1;
+            }
+        }
+
+        let mut stats: Vec<WpmBucketStat> = buckets
+            .into_iter()
+            .map(|(start, (total, correct))| {
+                let end = start.saturating_add(bucket_size.saturating_sub(1));
+                let accuracy_pct = if total > 0 {
+                    (correct as f32 / total as f32) * 100.0
+                } else {
+                    0.0
+                };
+                WpmBucketStat {
+                    start_wpm: start,
+                    label: format!("{}-{}", start, end),
+                    total,
+                    correct,
+                    accuracy_pct,
+                }
+            })
+            .collect();
+
+        stats.sort_by_key(|stat| stat.start_wpm);
+
+        stats
+    }
+
+    fn analyze_streaks(&self) -> StreakStats {
+        let mut streaks = StreakStats::default();
+
+        for qso in &self.qsos {
+            let clean = qso.callsign_correct && qso.exchange_correct;
+            if clean {
+                streaks.current_clean += 1;
+                streaks.current_error = 0;
+                if streaks.current_clean > streaks.max_clean {
+                    streaks.max_clean = streaks.current_clean;
+                }
+            } else {
+                streaks.current_error += 1;
+                streaks.current_clean = 0;
+                if streaks.current_error > streaks.max_error {
+                    streaks.max_error = streaks.current_error;
+                }
+            }
+        }
+
+        streaks
     }
 
     /// Count occurrences of each alphanumeric character in a string

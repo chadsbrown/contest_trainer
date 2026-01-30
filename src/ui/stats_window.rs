@@ -56,7 +56,7 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
 
         ui.add_space(4.0);
         ui.label(
-            RichText::new("Perfect = correct without using AGN")
+            RichText::new("Perfect = correct without using AGN or F5")
                 .small()
                 .italics(),
         );
@@ -87,6 +87,42 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
                 ));
                 ui.end_row();
             });
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        // Streaks section
+        ui.heading("Streaks");
+        ui.add_space(8.0);
+
+        egui::Grid::new("streaks_grid")
+            .num_columns(2)
+            .spacing([40.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("Current Clean:");
+                ui.label(format!("{}", analysis.streaks.current_clean));
+                ui.end_row();
+
+                ui.label("Max Clean:");
+                ui.label(format!("{}", analysis.streaks.max_clean));
+                ui.end_row();
+
+                ui.label("Current Error:");
+                ui.label(format!("{}", analysis.streaks.current_error));
+                ui.end_row();
+
+                ui.label("Max Error:");
+                ui.label(format!("{}", analysis.streaks.max_error));
+                ui.end_row();
+            });
+
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Clean = callsign and exchange both correct")
+                .small()
+                .italics(),
+        );
 
         ui.add_space(16.0);
         ui.separator();
@@ -145,6 +181,37 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
                 });
         } else {
             ui.label("No QSOs logged yet");
+        }
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        // WPM bucket accuracy
+        ui.heading("WPM Accuracy (2-WPM buckets)");
+        ui.add_space(8.0);
+
+        if analysis.wpm_buckets.is_empty() {
+            ui.label("No QSOs logged yet");
+        } else {
+            egui::Grid::new("wpm_bucket_grid")
+                .num_columns(4)
+                .spacing([20.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Bucket").strong());
+                    ui.label(RichText::new("Total").strong());
+                    ui.label(RichText::new("Correct").strong());
+                    ui.label(RichText::new("Accuracy").strong());
+                    ui.end_row();
+
+                    for bucket in &analysis.wpm_buckets {
+                        ui.label(bucket.label.clone());
+                        ui.label(format!("{}", bucket.total));
+                        ui.label(format!("{}", bucket.correct));
+                        ui.label(format!("{:.1}%", bucket.accuracy_pct));
+                        ui.end_row();
+                    }
+                });
         }
 
         ui.add_space(16.0);

@@ -204,7 +204,7 @@ impl Default for SimulationSettings {
             station_probability: 0.7,
             wpm_min: 28,
             wpm_max: 36,
-            frequency_spread_hz: 400.0,
+            frequency_spread_hz: 300.0,
             amplitude_min: 0.4,
             amplitude_max: 1.0,
             agn_request_probability: 0.1,

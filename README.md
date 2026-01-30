@@ -95,7 +95,7 @@ Access settings via File > Settings. The settings window opens as a separate win
 - **Max Simultaneous Stations**: How many stations can call at once (1-5)
 - **Station Probability**: Likelihood of stations calling after your CQ
 - **WPM Range**: Speed range for calling stations
-- **Frequency Spread**: Pitch variation between stations (Hz)
+- **Filter Width**: Total spread between calling stations (Hz). Offsets are ± half the width. Default 300 Hz (min 100, max 500).
 - **Signal Strength Range**: Volume variation between stations
 - **Mute background noise during TX**: Realism (probably for most people this is more realistic.  yes, there are exceptions.)
 - **Caller Needs Repeat Probability**: Chance that a caller will send "AGN" or "?" requesting you repeat your exchange

@@ -107,6 +107,7 @@ pub struct ContestApp {
     // AGN usage tracking for current QSO
     used_agn_callsign: bool,
     used_agn_exchange: bool,
+    used_f5_callsign: bool,
 
     // File dialog for settings
     file_dialog: FileDialog,
@@ -207,6 +208,7 @@ impl ContestApp {
             show_stats: false,
             used_agn_callsign: false,
             used_agn_exchange: false,
+            used_f5_callsign: false,
             file_dialog: FileDialog::new(),
             file_dialog_target: None,
         }
@@ -272,6 +274,7 @@ impl ContestApp {
         // Reset AGN tracking for new QSO
         self.used_agn_callsign = false;
         self.used_agn_exchange = false;
+        self.used_f5_callsign = false;
 
         // Reset context for new QSO
         self.context.reset();
@@ -538,6 +541,7 @@ impl ContestApp {
             .unwrap_or(false);
 
         // Send his call
+        self.used_f5_callsign = true;
         self.send_his_call();
 
         // If we have an exact match and no exchange sent yet, wait for the user to send exchange.
@@ -704,6 +708,7 @@ impl ContestApp {
             points: validation.points,
             used_agn_callsign: self.used_agn_callsign,
             used_agn_exchange: self.used_agn_exchange,
+            used_f5_callsign: self.used_f5_callsign,
         });
 
         // Update score
@@ -907,6 +912,7 @@ impl ContestApp {
         // Reset for new QSO
         self.used_agn_callsign = false;
         self.used_agn_exchange = false;
+        self.used_f5_callsign = false;
         self.context.reset();
         self.context.set_callers(callers);
 
