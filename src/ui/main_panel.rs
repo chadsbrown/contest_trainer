@@ -229,7 +229,7 @@ fn render_key_hints(ui: &mut egui::Ui) {
         ui.add_space(10.0);
 
         ui.label(RichText::new("Esc").strong().monospace());
-        ui.label("Clear");
+        ui.label("Stop");
     });
 }
 

@@ -74,12 +74,37 @@ fn normalize_cw_digits(value: &str) -> String {
         .collect()
 }
 
+fn normalize_rst(value: &str) -> String {
+    value
+        .trim()
+        .to_uppercase()
+        .chars()
+        .map(|c| match c {
+            'E' => '5',
+            'N' => '9',
+            'T' => '0',
+            _ => c,
+        })
+        .collect()
+}
+
 fn parse_serial(value: &str) -> Option<u32> {
     let normalized = normalize_cw_digits(value);
     if normalized.is_empty() || !normalized.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
     normalized.parse::<u32>().ok()
+}
+
+fn pick_rst() -> &'static str {
+    let roll = rand::thread_rng().gen_range(0..100);
+    if roll < 5 {
+        "ENN"
+    } else if roll < 15 {
+        "599"
+    } else {
+        "5NN"
+    }
 }
 
 impl Contest for CqWpxContest {
@@ -196,7 +221,7 @@ impl Contest for CqWpxContest {
     fn generate_exchange(&self, _callsign: &str, _serial: u32, settings: &toml::Value) -> Exchange {
         let (min, max) = Self::serial_range(settings);
         let serial = rand::thread_rng().gen_range(min..=max);
-        Exchange::new(vec!["5NN".to_string(), Self::format_serial(serial)])
+        Exchange::new(vec![pick_rst().to_string(), Self::format_serial(serial)])
     }
 
     fn user_exchange_fields(
@@ -219,9 +244,7 @@ impl Contest for CqWpxContest {
         let callsign_correct = expected_call.eq_ignore_ascii_case(received_call);
 
         let rst_ok = match (expected_exchange.fields.get(0), received_fields.get(0)) {
-            (Some(expected), Some(received)) => {
-                normalize_cw_digits(expected) == normalize_cw_digits(received)
-            }
+            (Some(expected), Some(received)) => normalize_rst(expected) == normalize_rst(received),
             _ => false,
         };
 

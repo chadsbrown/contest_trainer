@@ -1,3 +1,4 @@
+use rand::Rng;
 use toml::value::Table;
 
 use super::callsign::FileCallsignSource;
@@ -38,6 +39,31 @@ impl CqWwContest {
             .unwrap_or(default)
             .to_string()
     }
+}
+
+fn pick_rst() -> &'static str {
+    let roll = rand::thread_rng().gen_range(0..100);
+    if roll < 5 {
+        "ENN"
+    } else if roll < 15 {
+        "599"
+    } else {
+        "5NN"
+    }
+}
+
+fn normalize_rst(value: &str) -> String {
+    value
+        .trim()
+        .to_uppercase()
+        .chars()
+        .map(|c| match c {
+            'E' => '5',
+            'N' => '9',
+            'T' => '0',
+            _ => c,
+        })
+        .collect()
 }
 
 impl Contest for CqWwContest {
@@ -119,7 +145,7 @@ impl Contest for CqWwContest {
 
     fn generate_exchange(&self, callsign: &str, _serial: u32, _settings: &toml::Value) -> Exchange {
         let zone = self.zone_for_callsign(callsign);
-        Exchange::new(vec!["5NN".to_string(), format!("{:02}", zone)])
+        Exchange::new(vec![pick_rst().to_string(), format!("{:02}", zone)])
     }
 
     fn user_exchange_fields(
@@ -153,7 +179,7 @@ impl Contest for CqWwContest {
         let received_zone = received_fields.get(1).and_then(|z| z.parse::<u8>().ok());
 
         let rst_ok = match (expected_rst, received_rst) {
-            (Some(expected), Some(received)) => expected.eq_ignore_ascii_case(received),
+            (Some(expected), Some(received)) => normalize_rst(expected) == normalize_rst(received),
             _ => false,
         };
 

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use rand::seq::SliceRandom;
+use rand::Rng;
 use toml::value::Table;
 
 use super::types::{
@@ -146,7 +147,10 @@ impl CallsignSource for ArrlDxCallsignSource {
         let station = self.random_station()?;
         Some((
             station.callsign.clone(),
-            Exchange::new(vec!["5NN".to_string(), station.exchange.clone()]),
+            Exchange::new(vec![
+                pick_rst().to_string(),
+                maybe_t_substitute_power(&station.exchange),
+            ]),
         ))
     }
 }
@@ -162,6 +166,48 @@ fn normalize_cw_digits(value: &str) -> String {
             _ => c,
         })
         .collect()
+}
+
+fn normalize_rst(value: &str) -> String {
+    value
+        .trim()
+        .to_uppercase()
+        .chars()
+        .map(|c| match c {
+            'E' => '5',
+            'N' => '9',
+            'T' => '0',
+            _ => c,
+        })
+        .collect()
+}
+
+fn pick_rst() -> &'static str {
+    let roll = rand::thread_rng().gen_range(0..100);
+    if roll < 5 {
+        "ENN"
+    } else if roll < 15 {
+        "599"
+    } else {
+        "5NN"
+    }
+}
+
+fn maybe_t_substitute_power(exchange: &str) -> String {
+    let trimmed = exchange.trim();
+    if trimmed.is_empty() || !trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return trimmed.to_string();
+    }
+
+    let roll = rand::thread_rng().gen_range(0..100);
+    if roll < 80 {
+        trimmed
+            .chars()
+            .map(|c| if c == '0' { 'T' } else { c })
+            .collect()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 impl Contest for ArrlDxContest {
@@ -240,7 +286,7 @@ impl Contest for ArrlDxContest {
 
     fn generate_exchange(&self, _callsign: &str, _serial: u32, settings: &toml::Value) -> Exchange {
         let exchange = Self::get_string(settings, "user_exchange", "CT");
-        Exchange::new(vec!["5NN".to_string(), exchange])
+        Exchange::new(vec![pick_rst().to_string(), exchange])
     }
 
     fn user_exchange_fields(
@@ -264,9 +310,7 @@ impl Contest for ArrlDxContest {
         let callsign_correct = expected_call.eq_ignore_ascii_case(received_call);
 
         let rst_ok = match (expected_exchange.fields.get(0), received_fields.get(0)) {
-            (Some(expected), Some(received)) => {
-                normalize_cw_digits(expected) == normalize_cw_digits(received)
-            }
+            (Some(expected), Some(received)) => normalize_rst(expected) == normalize_rst(received),
             _ => false,
         };
 
