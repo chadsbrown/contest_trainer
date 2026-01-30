@@ -26,6 +26,9 @@ A Morse code contest simulator for practicing CW contest operating skills.
 | Space | Move to next field (Shift+Space moves backward) |
 | Esc | Stop transmission audio |
 
+Notes:
+- If you press **F5** after copying the callsign correctly, the station may acknowledge with **"R R"** instead of repeating the full callsign.
+
 ## Settings
 
 Access settings via **File > Settings**. Settings are automatically saved to your system's config directory.

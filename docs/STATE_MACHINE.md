@@ -68,6 +68,7 @@ pub struct QsoContext {
     pub correction_attempts: u8,
     pub wait_until: Option<Instant>,
     pub expecting_callsign_repeat: bool,
+    pub allow_callsign_repeat_ack: bool,
     pub caller_exchange_sent_once: bool,
     pub awaiting_user_exchange: bool,
 }
@@ -78,6 +79,7 @@ Key fields:
 - `active_callers`: All callers responding (for pileup situations)
 - `correction_in_progress`: Whether the station is correcting the user's callsign copy
 - `expecting_callsign_repeat`: Set after F5/F8 to tell `handle_station_response()` to have caller repeat their callsign
+- `allow_callsign_repeat_ack`: When true (F5 with exact match), caller may send "R R" instead of repeating the full callsign
 - `caller_exchange_sent_once`: Tracks whether the caller has already sent their exchange in this QSO
 - `awaiting_user_exchange`: Set when we have the caller's callsign and are waiting on the user to send exchange (caller should stay silent)
 
@@ -86,7 +88,8 @@ Key fields:
 - `sent_their_call` / `sent_our_exchange`: Set by `UserSegmentComplete` events when segmented user messages finish each element.
 - `received_their_call`: Set when the user submits a callsign (Enter in callsign field).
 - `received_their_exchange`: Set when the user submits an exchange (Enter in any exchange field).
-- `expecting_callsign_repeat`: Set by F5 (non-exact match) or F8 in callsign field.
+- `expecting_callsign_repeat`: Set by F5/F8 in callsign field.
+- `allow_callsign_repeat_ack`: Set by F5 when the entered callsign is an exact match.
 - `awaiting_user_exchange`: Set by F5 when the entered callsign matches the selected caller and our exchange has not been sent yet. Cleared when we send exchange (F2 or full exchange).
 - `caller_exchange_sent_once`: Set when the caller sends their exchange; used to suppress random AGN requests after the first exchange.
 
@@ -157,7 +160,7 @@ This is implemented in `CallerResponse::from_progress_and_context()` (which dele
 
 **Special cases in `handle_station_response()`:**
 
-1. **`expecting_callsign_repeat = true`**: Caller repeats their callsign (after F5 or F8 in callsign field)
+1. **`expecting_callsign_repeat = true`**: Caller repeats their callsign, or may send "R R" if `allow_callsign_repeat_ack` is true (F5 with exact match)
 2. **`correction_in_progress = true`**: Caller sends correction (75% once, 25% twice for emphasis)
 3. **Otherwise**: Uses `CallerResponse::from_progress_and_context()` to determine response
 
