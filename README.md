@@ -24,13 +24,18 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 ## Features
 
 - **Cross-platform Support**: Run on Windows, macOS, and Linux
-- **Multiple Contest Types**: Practice for CWT (default), CQ World Wide, CQ WPX, ARRL Sweepstakes, and ARRL DX CW
+- **Supported Contests**:
+  - CWT
+  - CQ WW
+  - CQ WPX
+  - ARRL Sweepstakes
+  - ARRL DX CW
+- **Persistent Caller Queue**: Callers stay on frequency across CQ cycles, retry after randomized delays based on “patience,” and eventually give up if not worked (with occasional tail-enders)
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
-- **Multiple Simultaneous Callers**: Handle pileups with multiple stations calling at once
+- **Multiple Simultaneous Callers**: User-configurable number of callers
 - **Background Noise**: Adjustable noise level to simulate real band conditions
-- **Tail-Ender Support**: Stations may call immediately after a QSO without waiting for your next CQ
+- **Tail-Ender Support**: Stations may call immediately after a QSO without waiting for your next CQ (or not)
 - **Partial Call Queries**: Use F5 to query a partial callsign when you can't copy the full call
-- **AGN Requests**: Use F8 to ask a station to repeat their exchange, or use F8 to have callers repeat callsigns
 - **Score Tracking**: Track QSOs, points, and hourly rate
 - **Session Statistics**: Detailed performance analysis including accuracy rates, WPM statistics, and character-level error tracking
 - **Persistent Settings**: Your configuration is saved between sessions
