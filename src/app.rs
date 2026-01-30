@@ -549,7 +549,8 @@ impl ContestApp {
             exact_match && !self.context.progress.sent_our_exchange;
 
         // Only expect a repeat when the callsign isn't an exact match.
-        self.context.expecting_callsign_repeat = !exact_match;
+        self.context.expecting_callsign_repeat = true;
+        self.context.allow_callsign_repeat_ack = exact_match;
 
         self.state = ContestState::UserTransmitting {
             tx_type: UserTxType::CallsignOnly,
@@ -791,6 +792,7 @@ impl ContestApp {
 
         // Mark that we expect the caller to repeat their callsign
         self.context.expecting_callsign_repeat = true;
+        self.context.allow_callsign_repeat_ack = false;
 
         self.state = ContestState::UserTransmitting {
             tx_type: UserTxType::Agn,
@@ -962,13 +964,21 @@ impl ContestApp {
             }
         };
 
-        // If we're expecting a callsign repeat (after partial query or F8), just send callsign
+        // If we're expecting a callsign repeat (after partial query or F8), send callsign or "R R"
         if self.context.expecting_callsign_repeat {
+            let allow_ack = self.context.allow_callsign_repeat_ack;
             self.context.expecting_callsign_repeat = false;
+            self.context.allow_callsign_repeat_ack = false;
+
+            let message = if allow_ack && rand::thread_rng().gen::<bool>() {
+                "R R".to_string()
+            } else {
+                caller.params.callsign.clone()
+            };
 
             let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
                 id: caller.params.id,
-                callsign: caller.params.callsign.clone(),
+                callsign: message,
                 exchange: caller.params.exchange.clone(),
                 frequency_offset_hz: caller.params.frequency_offset_hz,
                 wpm: caller.params.wpm,

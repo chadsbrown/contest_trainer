@@ -48,6 +48,8 @@ pub struct QsoContext {
     pub wait_until: Option<Instant>,
     /// Whether we're expecting caller to repeat their callsign (after partial query or F8)
     pub expecting_callsign_repeat: bool,
+    /// Whether the caller can acknowledge a correct callsign with "R R"
+    pub allow_callsign_repeat_ack: bool,
     /// Whether the caller has already sent their exchange in this QSO
     pub caller_exchange_sent_once: bool,
     /// Whether we expect to send our exchange next (suppress caller response)
@@ -70,6 +72,7 @@ impl QsoContext {
             correction_attempts: 0,
             wait_until: None,
             expecting_callsign_repeat: false,
+            allow_callsign_repeat_ack: false,
             caller_exchange_sent_once: false,
             awaiting_user_exchange: false,
         }
@@ -84,6 +87,7 @@ impl QsoContext {
         self.correction_attempts = 0;
         self.wait_until = None;
         self.expecting_callsign_repeat = false;
+        self.allow_callsign_repeat_ack = false;
         self.caller_exchange_sent_once = false;
         self.awaiting_user_exchange = false;
     }
