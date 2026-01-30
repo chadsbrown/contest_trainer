@@ -1,3 +1,5 @@
+[![Release](https://github.com/chadsbrown/contest_trainer/actions/workflows/release.yml/badge.svg)](https://github.com/chadsbrown/contest_trainer/actions/workflows/release.yml)
+
 # CW Contest Trainer
 
 A practice tool for amateur radio CW (Morse code) contest operators. Simulate realistic contest conditions and improve your copying and logging skills.
@@ -21,7 +23,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 
 ## Features
 
-- **Multi-platform Support**: Run on Windows, macOS, and Linux
+- **Cross-platform Support**: Run on Windows, macOS, and Linux
 - **Multiple Contest Types**: Practice for CWT (default), CQ World Wide, CQ WPX, ARRL Sweepstakes, and ARRL DX CW
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
 - **Multiple Simultaneous Callers**: Handle pileups with multiple stations calling at once
