@@ -67,7 +67,7 @@ jobs:
         run: |
           mkdir -p package/contest_trainer
           cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} package/contest_trainer/
-          cp callsigns.txt cwt_callsigns.txt arrldx_callsigns.txt package/contest_trainer/
+          cp callsigns.txt cwt_callsigns.txt arrldx_callsigns.txt ss_callsigns.txt package/contest_trainer/
 
       - name: Stage release bundle (windows)
         if: matrix.os == 'windows-latest'
@@ -78,6 +78,7 @@ jobs:
           Copy-Item callsigns.txt package\\contest_trainer\\
           Copy-Item cwt_callsigns.txt package\\contest_trainer\\
           Copy-Item arrldx_callsigns.txt package\\contest_trainer\\
+          Copy-Item ss_callsigns.txt package\\contest_trainer\\
 
       - name: Create zip (unix)
         shell: bash

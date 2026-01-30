@@ -15,7 +15,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
    - macOS Apple Silicon: `contest_trainer-<version>-macos-aarch64.zip`
    - Linux: `contest_trainer-<version>-linux-x86_64.zip`
 
-2. **Unzip** the archive. It contains a `contest_trainer/` folder with the binary and all callsign files.
+2. **Unzip** the archive. It contains a `contest_trainer/` folder with the binary and all callsign files (`callsigns.txt`, `cwt_callsigns.txt`, `arrldx_callsigns.txt`, `ss_callsigns.txt`).
 
 3. **Run the application** from inside the `contest_trainer/` folder.
 4. **Personalize settings** (File->Settings) to configure your callsign, name and exchange info.
@@ -140,6 +140,16 @@ CSV format with Call, Name, State, Power, UserText. Provide either State or Powe
 2E0CVN,,,50,
 K3LR,,PA,,
 3Z0X,,,K,
+```
+
+### Sweepstakes Format (ss_callsigns.txt)
+
+CSV format with Call, Sect, State, CK, UserText. Section and Check are required; State and UserText are ignored.
+
+```
+# Call,Sect,State,CK,UserText
+K1ABC,CT,,94,
+W7RN,WWA,,05,
 ```
 
 ## Building from Source

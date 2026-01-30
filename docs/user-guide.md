@@ -71,7 +71,7 @@ Contest-specific exchange fields (like Name, Zone, Section, or Exchange) are con
 - **Values**:
   - **CQ World Wide (CqWw)**: Exchange is RST + CQ Zone (e.g., `599 05`)
   - **CQ WPX**: Exchange is RST + Serial (e.g., `599 1053`)
-  - **ARRL Sweepstakes**: Exchange is serial + precedence + check + section (e.g., `42 A 99 CT`)
+  - **ARRL Sweepstakes**: Exchange is serial + precedence + callsign + check + section (e.g., `42 A K5ZD 99 CT`)
   - **CWT**: Exchange is name + number or name + state (e.g., `BOB 123` or `JOE TX`)
   - **ARRL DX CW**: Exchange is RST + exchange (state/province or power) (e.g., `599 CT` or `599 100`)
 
@@ -88,15 +88,17 @@ These fields are defined by the selected contest and can vary by contest type.
 
 ### Callsign File
 - **Purpose**: Path to the file containing callsigns for simulated stations
-- **Default**: Varies by contest (e.g., `callsigns.txt`, `cwt_callsigns.txt`, `arrldx_callsigns.txt`)
+- **Default**: Varies by contest (e.g., `callsigns.txt`, `cwt_callsigns.txt`, `arrldx_callsigns.txt`, `ss_callsigns.txt`)
 - **Values**: Path to a contest-appropriate callsign file
+
+**Sweepstakes** uses `ss_callsigns.txt` (Call,Sect,State,CK,UserText). Section and Check are required; State and UserText are ignored.
 
 ### Your Exchange
 - **Purpose**: Contest-defined exchange fields for your station
 - **Examples**:
   - **CWT**: Name + Number/State
   - **CQ WW**: CQ Zone
-  - **Sweepstakes**: Precedence + Check + Section
+  - **Sweepstakes**: Precedence + Check + Section (your callsign is included automatically)
   - **ARRL DX CW**: Exchange (State/Province or Power)
   - **CQ WPX**: Serial number
 
@@ -238,7 +240,7 @@ Opens a detailed statistics window showing:
 |---------|----------------|---------|
 | CQ WW | RST + Zone | `599 05` |
 | CQ WPX | RST + Serial | `599 1053` |
-| Sweepstakes | Serial + Prec + Check + Section | `42 A 99 CT` |
+| Sweepstakes | Serial + Prec + Call + Check + Section | `42 A K5ZD 99 CT` |
 | CWT | Name + Number (or Name + State) | `BOB 123` or `JOE TX` |
 | ARRL DX CW | RST + Exchange (State/Province or Power) | `599 CT` or `599 100` |
 
