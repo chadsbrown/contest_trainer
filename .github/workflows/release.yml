@@ -19,22 +19,22 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             binary_name: contest_trainer
-            asset_name: contest_trainer-linux-x86_64
+            asset_suffix: linux-x86_64
 
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             binary_name: contest_trainer.exe
-            asset_name: contest_trainer-windows-x86_64.exe
+            asset_suffix: windows-x86_64
 
           - target: x86_64-apple-darwin
             os: macos-latest
             binary_name: contest_trainer
-            asset_name: contest_trainer-macos-x86_64
+            asset_suffix: macos-x86_64
 
           - target: aarch64-apple-darwin
             os: macos-latest
             binary_name: contest_trainer
-            asset_name: contest_trainer-macos-aarch64
+            asset_suffix: macos-aarch64
 
     steps:
       - name: Checkout
@@ -54,16 +54,47 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Rename binary
+      - name: Set asset name
         shell: bash
         run: |
-          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} ${{ matrix.asset_name }}
+          echo "ASSET_NAME=contest_trainer-${{ github.ref_name }}-${{ matrix.asset_suffix }}.zip" >> $GITHUB_ENV
+
+      - name: Stage release bundle (unix)
+        shell: bash
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p package/contest_trainer
+          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} package/contest_trainer/
+          cp callsigns.txt cwt_callsigns.txt arrldx_callsigns.txt package/contest_trainer/
+
+      - name: Stage release bundle (windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package\\contest_trainer | Out-Null
+          Copy-Item target\\${{ matrix.target }}\\release\\${{ matrix.binary_name }} package\\contest_trainer\\
+          Copy-Item callsigns.txt package\\contest_trainer\\
+          Copy-Item cwt_callsigns.txt package\\contest_trainer\\
+          Copy-Item arrldx_callsigns.txt package\\contest_trainer\\
+
+      - name: Create zip (unix)
+        shell: bash
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd package
+          zip -r ../${{ env.ASSET_NAME }} contest_trainer
+
+      - name: Create zip (windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path package\\contest_trainer -DestinationPath $env:ASSET_NAME
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
+          name: ${{ env.ASSET_NAME }}
+          path: ${{ env.ASSET_NAME }}
 
   release:
     name: Create Release
@@ -85,8 +116,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/contest_trainer-linux-x86_64/contest_trainer-linux-x86_64
-            artifacts/contest_trainer-windows-x86_64.exe/contest_trainer-windows-x86_64.exe
-            artifacts/contest_trainer-macos-x86_64/contest_trainer-macos-x86_64
-            artifacts/contest_trainer-macos-aarch64/contest_trainer-macos-aarch64
+            artifacts/contest_trainer-${{ github.ref_name }}-linux-x86_64.zip/contest_trainer-${{ github.ref_name }}-linux-x86_64.zip
+            artifacts/contest_trainer-${{ github.ref_name }}-windows-x86_64.zip/contest_trainer-${{ github.ref_name }}-windows-x86_64.zip
+            artifacts/contest_trainer-${{ github.ref_name }}-macos-x86_64.zip/contest_trainer-${{ github.ref_name }}-macos-x86_64.zip
+            artifacts/contest_trainer-${{ github.ref_name }}-macos-aarch64.zip/contest_trainer-${{ github.ref_name }}-macos-aarch64.zip
           generate_release_notes: true
