@@ -73,6 +73,13 @@ pub fn render_settings_panel(
                 {
                     *settings_changed = true;
                 }
+
+                if ui
+                    .checkbox(&mut settings.user.show_main_hints, "Show Main Field Hints")
+                    .changed()
+                {
+                    *settings_changed = true;
+                }
             });
 
         ui.add_space(8.0);

@@ -35,15 +35,12 @@ impl CqWpxContest {
     }
 
     fn parse_integer(settings: &toml::Value, key: &str) -> Option<i64> {
-        settings
-            .get(key)
-            .and_then(|v| v.as_integer())
-            .or_else(|| {
-                settings
-                    .get(key)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.trim().parse::<i64>().ok())
-            })
+        settings.get(key).and_then(|v| v.as_integer()).or_else(|| {
+            settings
+                .get(key)
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.trim().parse::<i64>().ok())
+        })
     }
 
     fn serial_range(settings: &toml::Value) -> (u32, u32) {
@@ -166,12 +163,10 @@ impl Contest for CqWpxContest {
     }
 
     fn validate_settings(&self, settings: &toml::Value) -> Result<(), String> {
-        let min = Self::parse_integer(settings, "serial_min").ok_or_else(|| {
-            "Serial Min must be an integer between 1 and 12000.".to_string()
-        })?;
-        let max = Self::parse_integer(settings, "serial_max").ok_or_else(|| {
-            "Serial Max must be an integer between 1 and 12000.".to_string()
-        })?;
+        let min = Self::parse_integer(settings, "serial_min")
+            .ok_or_else(|| "Serial Min must be an integer between 1 and 12000.".to_string())?;
+        let max = Self::parse_integer(settings, "serial_max")
+            .ok_or_else(|| "Serial Max must be an integer between 1 and 12000.".to_string())?;
 
         if !(SERIAL_MIN_ALLOWED..=SERIAL_MAX_ALLOWED).contains(&min) {
             return Err("Serial Min must be between 1 and 12000.".to_string());

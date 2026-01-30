@@ -62,6 +62,11 @@ Access settings via **File > Settings**. Settings are automatically saved to you
 - **Default**: `true` (enabled)
 - **Values**: true/false
 
+### Show Main Field Hints
+- **Purpose**: Show or hide hint text in the main callsign/exchange input fields
+- **Default**: `false` (disabled)
+- **Values**: true/false
+
 Contest-specific exchange fields (like Name, Zone, Section, or Exchange) are configured under **Active Contest**.
 
 ---

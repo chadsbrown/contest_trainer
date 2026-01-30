@@ -5,7 +5,7 @@ use egui::{Color32, RichText, Vec2};
 
 pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
     // Contest type display
-    ui.horizontal(|ui| {
+    ui.horizontal_top(|ui| {
         ui.label(RichText::new("Contest:").strong());
         ui.label(app.contest.display_name());
     });
@@ -136,53 +136,60 @@ fn render_input_fields(ui: &mut egui::Ui, app: &mut ContestApp) {
         app.exchange_inputs = next;
     }
 
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Call:").strong());
-        let call_response = ui.add_sized(
-            Vec2::new(120.0, 24.0),
-            egui::TextEdit::singleline(&mut app.callsign_input)
-                .font(egui::TextStyle::Monospace)
-                .hint_text("Callsign"),
-        );
+    let label_size = (app.settings.user.font_size - 4.0).max(8.0);
+    egui::Grid::new("input_fields_grid")
+        .num_columns(exchange_fields.len() + 1)
+        .spacing([6.0, 2.0])
+        .show(ui, |ui| {
+            ui.label(RichText::new("Call").size(label_size));
+            for field in exchange_fields.iter() {
+                ui.label(RichText::new(field.label).size(label_size));
+            }
+            ui.end_row();
 
-        if call_response.changed() {
-            app.callsign_input = app.callsign_input.to_uppercase();
-        }
+            let mut call_edit = egui::TextEdit::singleline(&mut app.callsign_input)
+                .font(egui::TextStyle::Monospace);
+            if app.settings.user.show_main_hints {
+                call_edit = call_edit.hint_text("Callsign");
+            }
+            let call_response = ui.add_sized(Vec2::new(120.0, 24.0), call_edit);
 
-        if app.current_field == InputField::Callsign && !app.show_settings {
-            call_response.request_focus();
-        }
-        if call_response.clicked() {
-            app.current_field = InputField::Callsign;
-        }
-
-        ui.add_space(20.0);
-
-        ui.label(RichText::new("Exch:").strong());
-        for (idx, field) in exchange_fields.iter().enumerate() {
-            ui.add_space(6.0);
-            ui.label(RichText::new(field.label).small());
-            let width_px = exchange_field_width(ui, field.width_chars, app.settings.user.font_size);
-            let response = ui.add_sized(
-                Vec2::new(width_px, 24.0),
-                egui::TextEdit::singleline(&mut app.exchange_inputs[idx])
-                    .font(egui::TextStyle::Monospace)
-                    .hint_text(field.placeholder),
-            );
-            if response.changed() {
-                let normalized = normalize_exchange_input(&app.exchange_inputs[idx], field.kind);
-                app.exchange_inputs[idx] = normalized;
+            if call_response.changed() {
+                app.callsign_input = app.callsign_input.to_uppercase();
             }
 
-            if app.current_field == InputField::Exchange(idx) && !app.show_settings {
-                response.request_focus();
+            if app.current_field == InputField::Callsign && !app.show_settings {
+                call_response.request_focus();
             }
-            if response.clicked() {
-                app.current_field = InputField::Exchange(idx);
-                app.last_exchange_field_index = idx;
+            if call_response.clicked() {
+                app.current_field = InputField::Callsign;
             }
-        }
-    });
+
+            for (idx, field) in exchange_fields.iter().enumerate() {
+                let width_px =
+                    exchange_field_width(ui, field.width_chars, app.settings.user.font_size);
+                let mut exchange_edit = egui::TextEdit::singleline(&mut app.exchange_inputs[idx])
+                    .font(egui::TextStyle::Monospace);
+                if app.settings.user.show_main_hints {
+                    exchange_edit = exchange_edit.hint_text(field.placeholder);
+                }
+                let response = ui.add_sized(Vec2::new(width_px, 24.0), exchange_edit);
+                if response.changed() {
+                    let normalized =
+                        normalize_exchange_input(&app.exchange_inputs[idx], field.kind);
+                    app.exchange_inputs[idx] = normalized;
+                }
+
+                if app.current_field == InputField::Exchange(idx) && !app.show_settings {
+                    response.request_focus();
+                }
+                if response.clicked() {
+                    app.current_field = InputField::Exchange(idx);
+                    app.last_exchange_field_index = idx;
+                }
+            }
+            ui.end_row();
+        });
 }
 
 fn exchange_field_width(ui: &egui::Ui, width_chars: u8, font_size: f32) -> f32 {
