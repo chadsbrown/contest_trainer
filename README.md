@@ -7,18 +7,15 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 
 ## Quickstart
 
-1. **Download the binary** for your platform from the [Releases page](https://github.com/chadsbrown/contest_trainer/releases):
-   - Windows: `contest_trainer-windows-x86_64.exe`
-   - macOS Intel: `contest_trainer-macos-x86_64`
-   - macOS Apple Silicon: `contest_trainer-macos-aarch64`
-   - Linux: `contest_trainer-linux-x86_64`
+1. **Download the zip** for your platform from the [Releases page](https://github.com/chadsbrown/contest_trainer/releases):
+   - Windows: `contest_trainer-<version>-windows-x86_64.zip`
+   - macOS Intel: `contest_trainer-<version>-macos-x86_64.zip`
+   - macOS Apple Silicon: `contest_trainer-<version>-macos-aarch64.zip`
+   - Linux: `contest_trainer-<version>-linux-x86_64.zip`
 
-2. **Download the callsign files** from this repository (right click, save as) and place them in the same directory as the binary:
-   - [`callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/callsigns.txt) - for non-CWT contests (this is just a copy of SCP)
-   - [`cwt_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/cwt_callsigns.txt) - for CWT contest (this is just a copy of the history file for CWT from N1MM+)
-   - [`arrldx_callsigns.txt`](https://raw.githubusercontent.com/chadsbrown/contest_trainer/master/arrldx_callsigns.txt) - for ARRL DX CW (copy of history file for ARRL DX CW from N1MM+)
+2. **Unzip** the archive. It contains a `contest_trainer/` folder with the binary and all callsign files.
 
-3. **Run the application** 
+3. **Run the application** from inside the `contest_trainer/` folder.
 4. **Personalize settings** (File->Settings) to configure your callsign, name and exchange info.
 5. **Start running** by pressing F1/Enter to send your first CQ.
 
