@@ -1,5 +1,8 @@
 name: Deps Weekly (lockfile only)
 
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: "0 7 * * 1"

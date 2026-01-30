@@ -1,5 +1,8 @@
 name: Deps Weekly (Cargo.toml upgrade, incompatible)
 
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: "0 7 * * 1"
