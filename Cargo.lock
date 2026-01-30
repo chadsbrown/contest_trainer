@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "contest_trainer"
-version = "0.1.0"
+version = "0.5.3"
 dependencies = [
  "cpal",
  "crossbeam-channel",
