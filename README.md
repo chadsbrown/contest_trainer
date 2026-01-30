@@ -59,7 +59,7 @@ Pre-built binaries for Windows, macOS (Intel and Apple Silicon), and Linux are a
 | Space | Move between exchange fields |
 | Up Arrow | Increase your WPM |
 | Down Arrow | Decrease your WPM |
-| Esc | Clear inputs and stop audio |
+| Esc | Stop sending |
 
 ## UI Controls
 
