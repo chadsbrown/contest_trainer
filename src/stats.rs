@@ -29,12 +29,10 @@ pub struct StatsAnalysis {
     pub correct_callsigns: usize,
     pub correct_exchanges: usize,
     pub correct_qsos: usize, // Both callsign and exchange correct (may have used AGN)
-    pub perfect_qsos: usize, // Both correct AND no AGN used
     pub total_points: u32,
     pub callsign_accuracy: f32,
     pub exchange_accuracy: f32,
     pub correct_rate: f32, // Percentage of correct QSOs
-    pub perfect_rate: f32, // Percentage of perfect QSOs (no AGN)
     pub avg_station_wpm: f32,
     pub min_station_wpm: u8,
     pub max_station_wpm: u8,
@@ -92,25 +90,11 @@ impl SessionStats {
             .filter(|q| q.callsign_correct && q.exchange_correct)
             .count();
 
-        // Perfect QSOs: both correct AND no AGN used at all
-        let perfect_qsos = self
-            .qsos
-            .iter()
-            .filter(|q| {
-                q.callsign_correct
-                    && q.exchange_correct
-                    && !q.used_agn_callsign
-                    && !q.used_agn_exchange
-                    && !q.used_f5_callsign
-            })
-            .count();
-
         let total_points: u32 = self.qsos.iter().map(|q| q.points).sum();
 
         let callsign_accuracy = (correct_callsigns as f32 / total_qsos as f32) * 100.0;
         let exchange_accuracy = (correct_exchanges as f32 / total_qsos as f32) * 100.0;
         let correct_rate = (correct_qsos as f32 / total_qsos as f32) * 100.0;
-        let perfect_rate = (perfect_qsos as f32 / total_qsos as f32) * 100.0;
 
         // AGN usage stats
         let agn_callsign_count = self.qsos.iter().filter(|q| q.used_agn_callsign).count();
@@ -138,12 +122,10 @@ impl SessionStats {
             correct_callsigns,
             correct_exchanges,
             correct_qsos,
-            perfect_qsos,
             total_points,
             callsign_accuracy,
             exchange_accuracy,
             correct_rate,
-            perfect_rate,
             avg_station_wpm,
             min_station_wpm,
             max_station_wpm,

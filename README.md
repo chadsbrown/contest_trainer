@@ -97,7 +97,7 @@ Access settings via File > Settings. The settings window opens as a separate win
 - **WPM Range**: Speed range for calling stations
 - **Filter Width**: Total spread between calling stations (Hz). Offsets are ± half the width. Default 300 Hz (min 100, max 500).
 - **Signal Strength Range**: Volume variation between stations
-- **Mute background noise during TX**: Realism (probably for most people this is more realistic.  yes, there are exceptions.)
+- **Mute RX during TX (callers + noise)**: Realism (probably for most people this is more realistic.  yes, there are exceptions.)
 - **Caller Needs Repeat Probability**: Chance that a caller will send "AGN" or "?" requesting you repeat your exchange
 - **Filter Callers by Country**: Enable/disable country-based caller filtering. When enabled, controls the mix of domestic vs DX callers
 - **Same Country Probability**: (Only shown when filter is enabled) Controls how often callers are from your same DXCC country (0.0-1.0). Lower values mean more DX callers, higher values mean more domestic callers. Default is 0.1 (10% domestic). Uses cty.dat for country lookups based on callsign prefixes.
@@ -107,6 +107,7 @@ Access settings via File > Settings. The settings window opens as a separate win
 - **Tone Frequency**: Base pitch for CW tones (Hz)
 - **Noise Level**: Background noise intensity
 - **Master Volume**: Overall audio volume
+- **Mute sidetone during TX**: Mute your own transmitted audio while sending
 - **Static/QRN Settings**: Control static crashes, pops/clicks, and atmospheric noise
 - **Enable QSB**: Simulate realistic signal fading on caller signals
   - **Fade Depth**: How much the signal fades (0 = none, 1 = full fade to silence)

@@ -340,8 +340,17 @@ pub fn render_settings_panel(
 
                 if ui
                     .checkbox(
-                        &mut settings.audio.mute_noise_during_tx,
-                        "Mute background noise during TX",
+                        &mut settings.audio.mute_rx_during_tx,
+                        "Mute RX during TX (callers + noise)",
+                    )
+                    .changed()
+                {
+                    *settings_changed = true;
+                }
+                if ui
+                    .checkbox(
+                        &mut settings.audio.mute_sidetone_during_tx,
+                        "Mute sidetone during TX",
                     )
                     .changed()
                 {

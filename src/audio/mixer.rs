@@ -371,10 +371,12 @@ impl Mixer {
             *sample = 0.0;
         }
 
+        let user_tx_active = self.segmented_user_station.is_some();
+        let mute_rx = self.settings.mute_rx_during_tx && user_tx_active;
+        let mute_sidetone = self.settings.mute_sidetone_during_tx && user_tx_active;
+
         // Add noise (optionally muted while user is transmitting)
-        let mute_noise =
-            self.settings.mute_noise_during_tx && self.segmented_user_station.is_some();
-        if !mute_noise {
+        if !mute_rx {
             self.noise
                 .fill_buffer(buffer, self.settings.noise_level, &self.settings.noise);
         }
@@ -383,7 +385,9 @@ impl Mixer {
         for station in &mut self.stations {
             for sample in buffer.iter_mut() {
                 if let Some(station_sample) = station.next_sample() {
-                    *sample += station_sample;
+                    if !mute_rx {
+                        *sample += station_sample;
+                    }
                 } else {
                     break;
                 }
@@ -400,7 +404,9 @@ impl Mixer {
         if let Some(ref mut user) = self.segmented_user_station {
             for sample in buffer.iter_mut() {
                 if let Some(user_sample) = user.next_sample() {
-                    *sample += user_sample;
+                    if !mute_sidetone {
+                        *sample += user_sample;
+                    }
                 } else {
                     break;
                 }

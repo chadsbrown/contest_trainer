@@ -42,24 +42,12 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
                 ));
                 ui.end_row();
 
-                ui.label("Perfect QSOs:");
-                ui.label(format!(
-                    "{} ({:.1}%)",
-                    analysis.perfect_qsos, analysis.perfect_rate
-                ));
-                ui.end_row();
-
                 ui.label("Total Points:");
                 ui.label(format!("{}", analysis.total_points));
                 ui.end_row();
             });
 
         ui.add_space(4.0);
-        ui.label(
-            RichText::new("Perfect = correct without using AGN or F5")
-                .small()
-                .italics(),
-        );
 
         ui.add_space(16.0);
         ui.separator();
@@ -326,7 +314,7 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
 
                         // Result column
                         let is_correct = qso.callsign_correct && qso.exchange_correct;
-                        let is_perfect = is_correct && !agn_used;
+                        let is_perfect = is_correct && !agn_used && !qso.used_f5_callsign;
                         let (result_text, result_color) = if is_perfect {
                             ("OK", egui::Color32::GREEN)
                         } else if is_correct {
@@ -341,7 +329,7 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
 
             ui.add_space(4.0);
             ui.label(
-                RichText::new("AGN: C=callsign, X=exchange | OK=perfect, ok=correct with AGN")
+                RichText::new("AGN: C=callsign, X=exchange | ok=correct with AGN")
                     .small()
                     .italics(),
             );
