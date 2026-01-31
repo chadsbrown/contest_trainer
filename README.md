@@ -192,12 +192,17 @@ Settings are stored in:
 
 ## Acknowledgements
 
-This application was created collaboratively with [Claude](https://www.anthropic.com/claude) and [OpenAI Codex](https://openai.com/codex).
+Thanks to the following projects:
+- [Amateur Radio Country Files](https://www.country-files.com/) (AD1C) for CTY.DAT files, which are used in this project
+- [N1MM+ Logger](https://n1mmwp.hamdocs.com/) dev team, whose callsign history files are used in this project
+- [Super Check Partial](https://www.supercheckpartial.com/) team, whose work is used in this project
 
 Special thanks to the following people, who contributed feedback/ideas to the development of this application:
 - KD9UYC
 - DJ5CW
 - N9TTK
+- 
+This application was created collaboratively with [Claude](https://www.anthropic.com/claude) and [Codex](https://openai.com/codex).
 
 ## About
 
