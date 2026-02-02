@@ -42,6 +42,7 @@ pub struct StatsAnalysis {
     pub agn_callsign_count: usize,                 // QSOs where AGN was used for callsign
     pub agn_exchange_count: usize,                 // QSOs where AGN was used for exchange
     pub agn_any_count: usize,                      // QSOs where any AGN was used
+    pub f5_callsign_count: usize,                  // QSOs where F5 was used for callsign
 }
 
 #[derive(Clone, Debug, Default)]
@@ -104,6 +105,7 @@ impl SessionStats {
             .iter()
             .filter(|q| q.used_agn_callsign || q.used_agn_exchange)
             .count();
+        let f5_callsign_count = self.qsos.iter().filter(|q| q.used_f5_callsign).count();
 
         // WPM stats
         let wpms: Vec<u8> = self.qsos.iter().map(|q| q.station_wpm).collect();
@@ -135,6 +137,7 @@ impl SessionStats {
             agn_callsign_count,
             agn_exchange_count,
             agn_any_count,
+            f5_callsign_count,
         }
     }
 

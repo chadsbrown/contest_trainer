@@ -6,6 +6,7 @@ mod audio;
 mod config;
 mod contest;
 mod cty;
+mod export;
 mod messages;
 mod state;
 mod station;
