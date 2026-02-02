@@ -79,15 +79,6 @@ pub fn render_main_panel(ui: &mut egui::Ui, app: &mut ContestApp) {
         if ui.button("Session Stats").clicked() {
             app.show_stats = !app.show_stats;
         }
-
-        ui.add_space(10.0);
-
-        if ui.button("Export Stats").clicked() {
-            match crate::export::export_session_stats(&app.settings, &app.session_stats) {
-                Ok(filename) => app.export_result = Some(filename),
-                Err(e) => app.export_result = Some(format!("Error: {}", e)),
-            }
-        }
     });
 }
 

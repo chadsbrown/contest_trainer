@@ -13,10 +13,7 @@ use crate::messages::{
 use crate::state::{ContestState, QsoContext, StationTxType, StatusColor, UserTxType};
 use crate::station::{CallerManager, CallerResponse};
 use crate::stats::{QsoRecord, SessionStats};
-use crate::ui::{
-    render_export_dialog, render_main_panel, render_settings_panel, render_stats_window,
-    FileDialogTarget,
-};
+use crate::ui::{render_main_panel, render_settings_panel, render_stats_window, FileDialogTarget};
 
 /// Which input field is active
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1441,11 +1438,14 @@ impl eframe::App for ContestApp {
 
         // Stats window
         if self.show_stats {
-            render_stats_window(ctx, &self.session_stats, &mut self.show_stats);
+            render_stats_window(
+                ctx,
+                &self.settings,
+                &self.session_stats,
+                &mut self.show_stats,
+                &mut self.export_result,
+            );
         }
-
-        // Export result dialog
-        render_export_dialog(ctx, &mut self.export_result);
 
         // Main content
         egui::CentralPanel::default().show(ctx, |ui| {
