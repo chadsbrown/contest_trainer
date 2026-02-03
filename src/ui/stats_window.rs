@@ -1,7 +1,16 @@
+use crate::config::AppSettings;
+use crate::export::export_session_stats;
 use crate::stats::SessionStats;
+use crate::ui::render_export_dialog;
 use egui::RichText;
 
-pub fn render_stats_window(ctx: &egui::Context, stats: &SessionStats, show_stats: &mut bool) {
+pub fn render_stats_window(
+    ctx: &egui::Context,
+    settings: &AppSettings,
+    stats: &SessionStats,
+    show_stats: &mut bool,
+    export_result: &mut Option<String>,
+) {
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("stats_viewport"),
         egui::ViewportBuilder::default()
@@ -9,8 +18,24 @@ pub fn render_stats_window(ctx: &egui::Context, stats: &SessionStats, show_stats
             .with_inner_size([450.0, 550.0]),
         |ctx, _class| {
             egui::CentralPanel::default().show(ctx, |ui| {
+                // Centered Export Stats button at the top
+                ui.vertical_centered(|ui| {
+                    if ui.button("Export Stats").clicked() {
+                        match export_session_stats(settings, stats) {
+                            Ok(filename) => *export_result = Some(filename),
+                            Err(e) => *export_result = Some(format!("Error: {}", e)),
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+
                 render_stats_content(ui, stats);
             });
+
+            // Render export dialog within this viewport
+            render_export_dialog(ctx, export_result);
 
             if ctx.input(|i| i.viewport().close_requested()) {
                 *show_stats = false;
@@ -116,23 +141,27 @@ fn render_stats_content(ui: &mut egui::Ui, stats: &SessionStats) {
         ui.separator();
         ui.add_space(8.0);
 
-        // AGN Usage section
-        ui.heading("AGN Usage");
+        // F5/F8 Usage section
+        ui.heading("F5/F8 Usage");
         ui.add_space(8.0);
 
         egui::Grid::new("agn_grid")
             .num_columns(2)
             .spacing([40.0, 4.0])
             .show(ui, |ui| {
-                ui.label("Callsign AGN:");
+                ui.label("F5 (His Call):");
+                ui.label(format!("{}", analysis.f5_callsign_count));
+                ui.end_row();
+
+                ui.label("F8 Callsign:");
                 ui.label(format!("{}", analysis.agn_callsign_count));
                 ui.end_row();
 
-                ui.label("Exchange AGN:");
+                ui.label("F8 Exchange:");
                 ui.label(format!("{}", analysis.agn_exchange_count));
                 ui.end_row();
 
-                ui.label("Total with AGN:");
+                ui.label("Total with F8:");
                 if analysis.total_qsos > 0 {
                     let agn_pct =
                         (analysis.agn_any_count as f32 / analysis.total_qsos as f32) * 100.0;

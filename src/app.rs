@@ -112,6 +112,9 @@ pub struct ContestApp {
     // File dialog for settings
     file_dialog: FileDialog,
     file_dialog_target: Option<FileDialogTarget>,
+
+    // Export result for modal dialog
+    pub export_result: Option<String>,
 }
 
 impl ContestApp {
@@ -211,6 +214,7 @@ impl ContestApp {
             used_f5_callsign: false,
             file_dialog: FileDialog::new(),
             file_dialog_target: None,
+            export_result: None,
         }
     }
 
@@ -1434,7 +1438,13 @@ impl eframe::App for ContestApp {
 
         // Stats window
         if self.show_stats {
-            render_stats_window(ctx, &self.session_stats, &mut self.show_stats);
+            render_stats_window(
+                ctx,
+                &self.settings,
+                &self.session_stats,
+                &mut self.show_stats,
+                &mut self.export_result,
+            );
         }
 
         // Main content
