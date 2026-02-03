@@ -99,6 +99,8 @@ pub struct ActiveStation {
     pub amplitude: f32,
     pub completed: bool,
     pub qsb: QsbOscillator,
+    /// Samples remaining before this station starts transmitting (reaction delay)
+    pub delay_samples_remaining: usize,
 }
 
 impl ActiveStation {
@@ -121,6 +123,9 @@ impl ActiveStation {
             timer.element_samples(elements[0])
         };
 
+        // Calculate delay samples from reaction_delay_ms
+        let delay_samples = (sample_rate as u64 * params.reaction_delay_ms as u64 / 1000) as usize;
+
         Self {
             id: params.id,
             elements,
@@ -132,6 +137,7 @@ impl ActiveStation {
             amplitude: params.amplitude,
             completed: false,
             qsb: QsbOscillator::new(sample_rate, qsb_settings),
+            delay_samples_remaining: delay_samples,
         }
     }
 
@@ -141,6 +147,12 @@ impl ActiveStation {
         if self.completed || self.current_element_idx >= self.elements.len() {
             self.completed = true;
             return None;
+        }
+
+        // If still in delay period, decrement and return silence
+        if self.delay_samples_remaining > 0 {
+            self.delay_samples_remaining -= 1;
+            return Some(0.0);
         }
 
         let element = self.elements[self.current_element_idx];

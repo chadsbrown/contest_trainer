@@ -37,6 +37,8 @@ pub struct StationParams {
     pub frequency_offset_hz: f32,
     pub wpm: u8,
     pub amplitude: f32,
+    /// Delay in milliseconds before this station starts transmitting
+    pub reaction_delay_ms: u32,
 }
 
 /// Messages from UI thread to Audio thread

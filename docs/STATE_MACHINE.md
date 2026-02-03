@@ -23,7 +23,7 @@ This design enables:
 
 ### Key Components
 
-- **ContestState**: Minimal enum (~9 states) describing who is transmitting
+- **ContestState**: Minimal enum (~8 states) describing who is transmitting
 - **QsoContext**: Holds all QSO state data (callers, correction status, timers)
 - **QsoProgress**: Tracks what information has been sent/received
 - **CallerResponse**: Determines how a caller responds based on what they've heard
@@ -115,7 +115,6 @@ pub enum ContestState {
     WaitingForStation,
     StationTransmitting { tx_type: StationTxType },
     QsoComplete,
-    WaitingForTailEnder,
 }
 ```
 
@@ -178,7 +177,6 @@ This is implemented in `CallerResponse::from_progress_and_context()` (which dele
 | `WaitingForStation` | Brief pause (250ms) before station responds |
 | `StationTransmitting { tx_type }` | Station is transmitting (type specifies what) |
 | `QsoComplete` | QSO logged, TU being sent |
-| `WaitingForTailEnder` | 100ms pause before potential tail-ender calls |
 
 ### Main Flow (Happy Path)
 
@@ -217,10 +215,8 @@ Idle
   │                    [no tail]  [tail-ender]
   │                         │         │
   │                         ▼         ▼
-  │                       Idle   WaitingForTailEnder
-  │                                   │
-  │                                   ▼ [100ms]
-  │                              StationsCalling
+  │                       Idle   StationsCalling
+  │                              (reaction_delay_ms applied in audio)
 ```
 
 ### F5 - Send His Call (Callsign Only)
@@ -468,8 +464,9 @@ The `CallerManager` maintains a persistent queue of callers:
 - `patience: u8` - How many attempts before giving up (2-5)
 - `attempts: u8` - Current attempt count
 - `state: CallerState` - Waiting, Calling, GaveUp, Worked
-- `reaction_delay_ms: u32` - How fast this caller responds (100-800ms)
 - `ready_at: Instant` - When caller is ready to try again
+
+Note: `reaction_delay_ms` (100-800ms) is stored in `StationParams` and applied as an audio-level delay, creating staggered start times when multiple callers respond.
 
 ### CallerState
 - `Waiting` - In queue, ready to call
@@ -571,11 +568,12 @@ max_correction_attempts = 2
 
 | Delay | Duration | Purpose |
 |-------|----------|---------|
-| Post-CQ delay | 300ms | Before callers start responding |
+| Post-CQ delay | 200ms | Before callers start responding (app-level) |
 | Post-user-TX delay | 250ms | Before station responds to user |
-| Tail-ender delay | 100ms | Before tail-ender starts calling |
 | Caller retry delay | 200-1200ms | Before persistent caller tries again |
-| Caller reaction time | 100-800ms | How fast a caller responds to CQ |
+| Caller reaction time | 100-800ms | Per-caller delay applied in audio layer |
+
+Note: Caller reaction time is now applied directly in the audio stream, creating realistic staggered pileup timing where faster operators respond before slower ones. The total minimum delay after CQ is 300ms (200ms app delay + 100ms minimum reaction time).
 
 ## Audio Commands
 

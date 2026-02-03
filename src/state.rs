@@ -207,9 +207,6 @@ pub enum ContestState {
 
     /// QSO complete, TU being sent or just sent
     QsoComplete,
-
-    /// Brief pause before tail-ender starts calling
-    WaitingForTailEnder,
 }
 
 impl ContestState {
@@ -259,7 +256,6 @@ impl ContestState {
                 }
             },
             ContestState::QsoComplete => ("QSO logged! Press F1 for next", StatusColor::Green),
-            ContestState::WaitingForTailEnder => ("QSO logged! Waiting...", StatusColor::Green),
         }
     }
 }
@@ -318,6 +314,7 @@ mod tests {
                 frequency_offset_hz: 0.0,
                 wpm: 25,
                 amplitude: 1.0,
+                reaction_delay_ms: 0,
             },
         };
 
@@ -329,6 +326,7 @@ mod tests {
                 frequency_offset_hz: 100.0,
                 wpm: 30,
                 amplitude: 0.8,
+                reaction_delay_ms: 0,
             },
         };
 

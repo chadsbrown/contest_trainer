@@ -76,8 +76,6 @@ pub struct PersistentCaller {
     pub state: CallerState,
     /// When the caller will be ready to try again
     pub ready_at: Instant,
-    /// Delay before responding to CQ (reaction time)
-    pub reaction_delay_ms: u32,
 }
 
 impl PersistentCaller {
@@ -275,12 +273,12 @@ impl CallerManager {
                 frequency_offset_hz: freq_offset,
                 wpm,
                 amplitude,
+                reaction_delay_ms,
             },
             patience,
             attempts: 0,
             state: CallerState::Waiting,
             ready_at: Instant::now(),
-            reaction_delay_ms,
         })
     }
 
@@ -314,8 +312,9 @@ impl CallerManager {
         for caller in &self.queue {
             jitter.insert(caller.params.id, rng.gen_range(0..100));
         }
-        self.queue
-            .sort_by_key(|c| c.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0));
+        self.queue.sort_by_key(|c| {
+            c.params.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0)
+        });
 
         for caller in &mut self.queue {
             if responding.len() >= max_callers {
