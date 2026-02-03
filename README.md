@@ -174,6 +174,14 @@ cargo build --release
 ./target/release/contest_trainer
 ```
 
+### Windows - vcruntime140.dll
+
+If the program fails to start with an error about this DLL being missing, you should try installing the package here (provided by Microsoft) that corresponds to your system architecture.  At the moment, I'm only providing builds for x64, so I imagine you'd need the x64 version.
+
+https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-supported-redistributable-version
+
+A user reported that this fixed their issue.
+
 ### Linux Dependencies
 
 On Linux, you may need to install audio and GUI dependencies:
