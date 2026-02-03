@@ -913,7 +913,9 @@ impl ContestApp {
         };
 
         // Prepare the tail-ender
-        let callers = vec![ActiveCaller { params }];
+        let callers = vec![ActiveCaller {
+            params: params.clone(),
+        }];
 
         // Reset for new QSO
         self.used_agn_callsign = false;
@@ -922,9 +924,9 @@ impl ContestApp {
         self.context.reset();
         self.context.set_callers(callers);
 
-        // Wait briefly before tail-ender starts calling
-        self.context.set_wait(100);
-        self.state = ContestState::WaitingForTailEnder;
+        // Start tail-ender audio immediately (reaction_delay_ms handles the delay)
+        let _ = self.cmd_tx.send(AudioCommand::StartStation(params));
+        self.state = ContestState::StationsCalling;
     }
 
     /// Check and handle waiting states
@@ -936,15 +938,6 @@ impl ContestApp {
         match self.state {
             ContestState::WaitingForStation => {
                 self.handle_station_response();
-            }
-            ContestState::WaitingForTailEnder => {
-                // Start tail-ender audio
-                for caller in &self.context.active_callers {
-                    let _ = self
-                        .cmd_tx
-                        .send(AudioCommand::StartStation(caller.params.clone()));
-                }
-                self.state = ContestState::StationsCalling;
             }
             _ => {}
         }
@@ -987,6 +980,7 @@ impl ContestApp {
                 frequency_offset_hz: caller.params.frequency_offset_hz,
                 wpm: caller.params.wpm,
                 amplitude: caller.params.amplitude,
+                reaction_delay_ms: 0,
             }));
 
             self.state = ContestState::StationsCalling;
@@ -1010,6 +1004,7 @@ impl ContestApp {
                 frequency_offset_hz: caller.params.frequency_offset_hz,
                 wpm: caller.params.wpm,
                 amplitude: caller.params.amplitude,
+                reaction_delay_ms: 0,
             }));
 
             self.state = ContestState::StationTransmitting {
@@ -1039,6 +1034,7 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
+                    reaction_delay_ms: 0,
                 }));
 
                 self.state = ContestState::StationsCalling;
@@ -1055,6 +1051,7 @@ impl ContestApp {
                     frequency_offset_hz: caller.params.frequency_offset_hz,
                     wpm: caller.params.wpm,
                     amplitude: caller.params.amplitude,
+                    reaction_delay_ms: 0,
                 }));
 
                 self.state = ContestState::StationTransmitting {
@@ -1079,6 +1076,7 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
+                        reaction_delay_ms: 0,
                     }));
 
                     self.state = ContestState::StationTransmitting {
@@ -1095,6 +1093,7 @@ impl ContestApp {
                         frequency_offset_hz: caller.params.frequency_offset_hz,
                         wpm: caller.params.wpm,
                         amplitude: caller.params.amplitude,
+                        reaction_delay_ms: 0,
                     }));
 
                     self.context.caller_exchange_sent_once = true;
@@ -1120,8 +1119,9 @@ impl ContestApp {
         }
 
         // Wait a bit after CQ before callers respond
+        // (callers also have individual reaction_delay_ms applied in audio)
         if let Some(finished) = self.last_cq_finished {
-            if finished.elapsed().as_millis() < 300 {
+            if finished.elapsed().as_millis() < 200 {
                 return;
             }
         }
