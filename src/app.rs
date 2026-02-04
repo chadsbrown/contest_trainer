@@ -1399,6 +1399,10 @@ impl eframe::App for ContestApp {
                                             *settings_changed = true;
                                         }
                                     }
+                                    FileDialogTarget::ExportDirectory => {
+                                        settings.user.export_directory = path_str.to_string();
+                                        *settings_changed = true;
+                                    }
                                 }
                             }
                         }

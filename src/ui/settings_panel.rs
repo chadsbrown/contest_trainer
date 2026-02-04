@@ -7,6 +7,7 @@ use egui_file_dialog::FileDialog;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum FileDialogTarget {
     ContestSetting { contest_id: String, key: String },
+    ExportDirectory,
 }
 
 pub fn render_settings_panel(
@@ -80,6 +81,25 @@ pub fn render_settings_panel(
                 {
                     *settings_changed = true;
                 }
+
+                ui.add_space(4.0);
+                ui.label("Stats Export Directory:");
+                ui.horizontal(|ui| {
+                    let display = if settings.user.export_directory.is_empty() {
+                        "(current directory)".to_string()
+                    } else {
+                        settings.user.export_directory.clone()
+                    };
+                    ui.add(egui::TextEdit::singleline(&mut display.as_str()).desired_width(250.0));
+                    if ui.button("Browse...").clicked() {
+                        *file_dialog_target = Some(FileDialogTarget::ExportDirectory);
+                        file_dialog.pick_directory();
+                    }
+                    if !settings.user.export_directory.is_empty() && ui.button("Clear").clicked() {
+                        settings.user.export_directory.clear();
+                        *settings_changed = true;
+                    }
+                });
             });
 
         ui.add_space(8.0);

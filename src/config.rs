@@ -20,6 +20,8 @@ pub struct UserSettings {
     pub show_main_hints: bool,
     #[serde(default = "default_true")]
     pub show_status_line: bool,
+    #[serde(default)]
+    pub export_directory: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -145,6 +147,7 @@ impl Default for UserSettings {
             agn_message: "?".to_string(),
             show_main_hints: false,
             show_status_line: true,
+            export_directory: String::new(),
         }
     }
 }
