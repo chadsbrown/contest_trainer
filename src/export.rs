@@ -3,9 +3,11 @@ use crate::stats::SessionStats;
 use chrono::Local;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 
-/// Export session statistics to a markdown file in the current directory.
-/// Returns Ok(filename) on success, Err(error_message) on failure.
+/// Export session statistics to a markdown file.
+/// Uses the configured export directory, or the current directory if not set.
+/// Returns Ok(filepath) on success, Err(error_message) on failure.
 pub fn export_session_stats(
     settings: &AppSettings,
     stats: &SessionStats,
@@ -19,13 +21,23 @@ pub fn export_session_stats(
     };
 
     let filename = format!("CWCT-{}-{}.md", callsign_safe, now.format("%Y%m%d-%H%M"));
+
+    let filepath = if settings.user.export_directory.is_empty() {
+        PathBuf::from(&filename)
+    } else {
+        let dir = PathBuf::from(&settings.user.export_directory);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create export directory: {}", e))?;
+        dir.join(&filename)
+    };
+
     let content = build_markdown_content(settings, stats);
 
-    let mut file = File::create(&filename).map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut file = File::create(&filepath).map_err(|e| format!("Failed to create file: {}", e))?;
     file.write_all(content.as_bytes())
         .map_err(|e| format!("Failed to write file: {}", e))?;
 
-    Ok(filename)
+    Ok(filepath.to_string_lossy().into_owned())
 }
 
 fn build_markdown_content(settings: &AppSettings, stats: &SessionStats) -> String {
