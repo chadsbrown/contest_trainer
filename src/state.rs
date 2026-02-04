@@ -44,6 +44,8 @@ pub struct QsoContext {
     pub correction_in_progress: bool,
     /// Number of correction attempts
     pub correction_attempts: u8,
+    /// Number of confused response attempts (caller didn't hear their callsign)
+    pub confused_attempts: u8,
     /// Timer for waiting states
     pub wait_until: Option<Instant>,
     /// Whether we're expecting caller to repeat their callsign (after partial query or F8)
@@ -70,6 +72,7 @@ impl QsoContext {
             active_callers: Vec::new(),
             correction_in_progress: false,
             correction_attempts: 0,
+            confused_attempts: 0,
             wait_until: None,
             expecting_callsign_repeat: false,
             allow_callsign_repeat_ack: false,
@@ -85,6 +88,7 @@ impl QsoContext {
         self.active_callers.clear();
         self.correction_in_progress = false;
         self.correction_attempts = 0;
+        self.confused_attempts = 0;
         self.wait_until = None;
         self.expecting_callsign_repeat = false;
         self.allow_callsign_repeat_ack = false;
@@ -124,6 +128,11 @@ impl QsoContext {
     /// Increment correction attempt
     pub fn increment_correction_attempt(&mut self) {
         self.correction_attempts += 1;
+    }
+
+    /// Increment confused attempt
+    pub fn increment_confused_attempt(&mut self) {
+        self.confused_attempts += 1;
     }
 
     /// End correction flow
