@@ -1019,25 +1019,61 @@ impl ContestApp {
 
         match response {
             CallerResponse::Confused => {
-                // Caller didn't hear their callsign - resend it or send "?"
-                let mut rng = rand::thread_rng();
-                let message = if rng.gen::<bool>() {
-                    caller.params.callsign.clone()
+                self.context.increment_confused_attempt();
+
+                // max_correction_attempts is used for both the correction loop
+                // and the confused loop escape threshold
+                let max_attempts = self
+                    .settings
+                    .simulation
+                    .call_correction
+                    .max_correction_attempts;
+
+                if self.context.confused_attempts > max_attempts {
+                    // Caller gives up waiting and sends callsign + exchange together,
+                    // like an impatient operator in a real contest
+                    let exchange_str = self.contest.format_exchange(&caller.params.exchange);
+                    let message = format!("{} {}", caller.params.callsign, exchange_str);
+
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: message,
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                        reaction_delay_ms: 0,
+                    }));
+
+                    // Advance progress so the QSO can complete
+                    self.context.progress.sent_their_call = true;
+                    self.context.progress.sent_our_exchange = true;
+                    self.context.caller_exchange_sent_once = true;
+
+                    self.state = ContestState::StationTransmitting {
+                        tx_type: StationTxType::SendingExchange,
+                    };
                 } else {
-                    "?".to_string()
-                };
+                    // Caller didn't hear their callsign - resend it or send "?"
+                    let mut rng = rand::thread_rng();
+                    let message = if rng.gen::<bool>() {
+                        caller.params.callsign.clone()
+                    } else {
+                        "?".to_string()
+                    };
 
-                let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
-                    id: caller.params.id,
-                    callsign: message,
-                    exchange: caller.params.exchange.clone(),
-                    frequency_offset_hz: caller.params.frequency_offset_hz,
-                    wpm: caller.params.wpm,
-                    amplitude: caller.params.amplitude,
-                    reaction_delay_ms: 0,
-                }));
+                    let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
+                        id: caller.params.id,
+                        callsign: message,
+                        exchange: caller.params.exchange.clone(),
+                        frequency_offset_hz: caller.params.frequency_offset_hz,
+                        wpm: caller.params.wpm,
+                        amplitude: caller.params.amplitude,
+                        reaction_delay_ms: 0,
+                    }));
 
-                self.state = ContestState::StationsCalling;
+                    self.state = ContestState::StationsCalling;
+                }
             }
             CallerResponse::RequestAgn => {
                 // Caller heard their call but not our exchange - request AGN

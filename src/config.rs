@@ -111,7 +111,9 @@ pub struct SimulationSettings {
 pub struct CallCorrectionSettings {
     /// Probability caller will correct a busted callsign (vs just proceeding)
     pub correction_probability: f32,
-    /// Max times caller will try to correct before giving up
+    /// Max times caller will try to correct before giving up.
+    /// Also used as the threshold for escaping the confused loop
+    /// (caller sends callsign + exchange after this many confused attempts).
     pub max_correction_attempts: u8,
 }
 
