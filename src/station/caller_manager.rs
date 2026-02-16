@@ -375,21 +375,16 @@ impl CallerManager {
         // until either worked or CQ restart
     }
 
-    /// Try to spawn a tail-ender after QSO completion
-    /// Returns Some if a tail-ender will call
+    /// Try to spawn tail-enders after QSO completion
+    /// Returns list of tail-enders that will call (uses geometric decay for multiple callers)
     pub fn try_spawn_tail_ender(
         &mut self,
         contest: &dyn Contest,
         contest_settings: &toml::Value,
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
-    ) -> Option<StationParams> {
+    ) -> Vec<StationParams> {
         let mut rng = rand::thread_rng();
-
-        // Probability check
-        if rng.gen::<f32>() > self.settings.station_probability {
-            return None;
-        }
 
         // Replenish queue first
         self.replenish_queue(contest, contest_settings, user_callsign, cty);
@@ -398,20 +393,48 @@ impl CallerManager {
         self.queue
             .retain(|c| c.state != CallerState::Worked && c.state != CallerState::GaveUp);
 
-        // Clear active list for new potential caller
+        // Clear active list for new potential callers
         self.active_ids.clear();
 
-        // Find a waiting caller to be the tail-ender
+        // Select tail-enders (up to max_simultaneous) with geometric decay
+        let mut responding: Vec<StationParams> = Vec::new();
+        let max_callers = self.settings.max_simultaneous_stations as usize;
+        let decay_factor: f32 = 0.5;
+
+        // Sort by reaction time with a stable random jitter
+        let mut jitter: HashMap<StationId, u32> = HashMap::new();
+        for caller in &self.queue {
+            jitter.insert(caller.params.id, rng.gen_range(0..100));
+        }
+        self.queue.sort_by_key(|c| {
+            c.params.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0)
+        });
+
         for caller in &mut self.queue {
-            if caller.state == CallerState::Waiting && caller.is_ready_to_call() {
-                caller.mark_calling();
-                caller.record_attempt();
-                self.active_ids.push(caller.params.id);
-                return Some(caller.params.clone());
+            if responding.len() >= max_callers {
+                break;
             }
+
+            // Only consider waiting callers that are ready
+            if caller.state != CallerState::Waiting || !caller.is_ready_to_call() {
+                continue;
+            }
+
+            // Geometric decay: base_probability * 0.5^slot
+            let base_probability = 0.5 + (caller.patience as f32 - 1.0) * 0.1;
+            let slot_probability = base_probability * decay_factor.powi(responding.len() as i32);
+            if rng.gen::<f32>() > slot_probability {
+                continue;
+            }
+
+            // This caller will tail-end
+            caller.mark_calling();
+            caller.record_attempt();
+            self.active_ids.push(caller.params.id);
+            responding.push(caller.params.clone());
         }
 
-        None
+        responding
     }
 }
 
