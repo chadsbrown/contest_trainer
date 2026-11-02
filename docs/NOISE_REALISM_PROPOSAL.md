@@ -1,19 +1,38 @@
 # Proposal: Realistic Band Noise and Receiver Audio
 
-- **Status:** Initial noise-generator fixes implemented on `improve-noise-realism`; receiver redesign remains a draft
-- **Date:** 2026-11-01
+- **Status:** Phase 1 (noise-generator fixes) implemented on `improve-noise-realism` in `9467a9b`. Phase 1 follow-ups and Phases 2–6 are planned (see §5).
+- **Delivery:** all phases land on `improve-noise-realism` and ship as one release. Nothing merges to `master` until the work is complete.
+- **Last updated:** 2026-11-02 (first draft 2026-11-01)
 - **Baseline:** `master` at `b490ffb` (v0.7.0)
-- **Scope:** Initial fixes: `src/audio/noise.rs` and `src/audio/mixer.rs`. Later SNR work also touches `src/config.rs`, `src/ui/settings_panel.rs`, caller generation, and potentially station messages. Receiver processing must consistently use the actual device sample rate.
+- **Scope:** Phase 1 touched only `src/audio/noise.rs` and `src/audio/mixer.rs`. Later phases also touch `src/config.rs`, `src/ui/settings_panel.rs`, caller generation, and possibly station messages. All receiver processing must use the actual device sample rate.
+
+**Contents:** §1 Background · §2 Status at a glance · §3 Baseline findings · §4 Completed work · §5 Remaining work (in execution order) · §6 Validation plan · §7 Compatibility and migration · §8 Decisions needed · §9 Appendix: measurements
 
 ## 1. Background
 
-Users have reported in person (not on GitHub) that the background noise "isn't realistic at all." This document explains why the current noise sounds wrong and proposes changes in phases. Phases can be reviewed and merged on their own.
+Users have reported in person (not on GitHub) that the background noise "isn't realistic at all." This document explains why the original noise sounded wrong, records what has been fixed, and plans the remaining changes in phases.
 
-File/line references in Sections 2–3 describe the baseline commit, before the changes below. The original measurements were unseeded diagnostic snapshots; they are not exact reproducible benchmarks. Section 7 now provides a seeded probe for the current implementation.
+This is one cohesive body of work. Phases are milestones on a single branch, each landing as one or more commits with its own tests, so that intermediate states are reviewable. They are not separate releases or PRs. Intermediate states (for example, Phase 1 without Phase 2's crackle) never reach users, so release notes and settings migration are written once, for the final result.
 
-Implemented in this first increment: configured startup filter, QRN entirely before the filter with no sub-audio oscillator output, slow held-target background level variation, and exponentially decaying pops. Configuration fields and stored values are retained. Background audio will sound quieter because broadband hiss and sub-audio energy have been removed. Crashes retain their existing noise-burst model; clustered crackle, shared caller filtering, SNR controls, AGC, and QRM remain future work.
+**Phase numbering changed on 2026-11-02.** Phases are now numbered in the order the work must happen. The shared receiver filter must exist before SNR calibration can be defined against it. Old → new mapping: old 1b crackle and 1d crash clusters → Phase 2; old 3a/3c → Phase 3; old Phase 2 → Phase 4; old 3b → Phase 5; old Phase 4 → Phase 6.
 
-## 2. Baseline audio path (before this branch)
+## 2. Status at a glance
+
+| Phase | Work | Findings | Status |
+|---|---|---|---|
+| 1 | Fix noise generator defects | F1, F6, F7, F9 | **Done** (`9467a9b`) |
+| 1-FU | Test robustness, doc/test threshold alignment, sample-rate normalization | §4.3 | Next |
+| 2 | QRN character: crackle stream, clustered crashes | F1 (remainder), F8 | Planned |
+| 3 | Shared receiver filter for noise and callers; mixer restructure | F3, F4 | Planned; needs D5, D6 |
+| 4 | Calibrate SNR; caller strength in dB | F2 | Planned; needs D2–D4, D8; depends on Phase 3 |
+| 5 | AGC | F5 | Planned |
+| 6 | Background QRM (optional) | — | Needs D9 (in or out of this release) |
+
+## 3. Baseline findings (before this branch)
+
+File and line references in this section point to the baseline commit `b490ffb`. The measurements are historical, unseeded snapshots; they are context, not acceptance thresholds. Current seeded numbers are in §9.2.
+
+### 3.1 Baseline audio path
 
 ```
 NoiseGenerator::next_sample (src/audio/noise.rs:258)
@@ -30,9 +49,9 @@ Mixer::fill_buffer (src/audio/mixer.rs:371)
 
 Relevant defaults (`src/config.rs:176-198`): `tone_frequency_hz = 600`, `noise_bandwidth = 350`, `noise_level = 0.25`, `master_volume = 0.7`, `crash_rate = 0.4`, `crash_intensity = 0.2`, `pop_rate = 0.6`, `pop_intensity = 0.73`, `qrn_intensity = 0.3`. Caller amplitude defaults are `amplitude_min = 0.4` and `amplitude_max = 1.0` (`src/config.rs:219-220`).
 
-## 3. Findings
+### 3.2 Historical measurements
 
-Historical, approximate measurements of baseline `NoiseGenerator` output at 44.1 kHz with `level = 0.25` and the filter set to 600 Hz / 350 Hz. RMS used 20 s; the supplied original spectral probe used only the first 5 s. These numbers are retained as diagnostic context, not acceptance thresholds for the new implementation.
+Baseline `NoiseGenerator` output at 44.1 kHz with `level = 0.25` and the filter set to 600 Hz / 350 Hz. RMS used 20 s; the spectral probe used only the first 5 s.
 
 | Signal | RMS |
 |---|---|
@@ -55,176 +74,245 @@ Spectrum in dB (relative, Hann-windowed DFT averaged over 4096-sample frames):
 | 12000 | -42.5 | -9.3 | -9.1 |
 | 18000 | -52.9 | -8.5 | -7.8 |
 
-### F1. QRN adds unfiltered broadband hiss and sub-audio wobble (highest impact)
+### 3.3 Findings
 
-- `qrn_sample()` (`src/audio/noise.rs:228-255`) is added **after** the bandpass filter (`:282-284`).
-- It contains:
-  - 0.3 Hz and 0.51 Hz sine waves, far below hearing. They only move the waveform's DC level; peak 0.084.
-  - Uniform white noise of ±0.3 that is never filtered, so it is flat to Nyquist.
-- Total QRN RMS is about 13 dB above filtered-background RMS in this snapshot, but includes substantial inaudible sub-audio energy. That ratio cannot establish audible dominance. The relatively flat high-frequency spectrum does independently reveal the unfiltered hiss path; perceived realism still needs listening comparisons.
-- `mod_depth` uses a third sine at 0.03 Hz (about 33 s per cycle), so the hiss swells and fades over roughly half a minute. Measured 100 ms RMS ranges from 0.0083 to 0.062.
+**F1. QRN added unfiltered broadband hiss and sub-audio wobble (highest impact).** *Fixed in Phase 1; distinctive QRN character remains for Phase 2.*
+- `qrn_sample()` (`noise.rs:228-255`) was added **after** the bandpass filter (`:282-284`).
+- It contained 0.3 Hz and 0.51 Hz sine waves (below hearing; they only shifted the waveform's DC level, peak 0.084), plus uniform white noise of ±0.3 that was never filtered, so it was flat to Nyquist.
+- Total QRN RMS was about 13 dB above the filtered background, but much of that was inaudible sub-audio energy. The flat high-frequency spectrum independently shows the unfiltered hiss path.
+- `mod_depth` used a third sine at 0.03 Hz (about 33 s per cycle), so the hiss swelled and faded over about half a minute. 100 ms RMS ranged from 0.0083 to 0.062.
 
-### F2. Signal-to-noise ratio is unrealistically high
+**F2. Signal-to-noise ratio is unrealistically high.** *Open, Phase 4.*
+- Callers are full-scale sine waves (`src/audio/morse.rs:75`) scaled by 0.4–1.0 (`mixer.rs:169`).
+- Signal RMS is 0.28–0.71 against filtered noise of 0.0063: **about 33–41 dB SNR in the 350 Hz passband**. Even at the slider maximum `noise_level = 0.5` (`src/ui/settings_panel.rs:325`) it is about 27–35 dB.
+- These are nominal key-down estimates without QSB. A weak-signal practice preset may want 0–15 dB reference SNR; defaults need listening review against an explicitly defined reference bandwidth.
 
-- Callers are full-scale sine waves (`src/audio/morse.rs:75`) scaled by 0.4–1.0 (`src/audio/mixer.rs:169`).
-- Signal RMS is 0.28–0.71, against filtered noise of 0.0063. **SNR in the 350 Hz passband is about 33–41 dB.** Even at the slider maximum `noise_level = 0.5` (`src/ui/settings_panel.rs:325`) it is still about 27–35 dB.
-- These are nominal key-down estimates without QSB; they do not establish that noise can never mask a signal. A useful weak-signal practice preset may include 0–15 dB reference SNR, but defaults need listening review using an explicitly defined reference bandwidth.
-
-### F3. Receiver filter is too gentle
-
-- A single RBJ 2nd-order bandpass (`src/audio/noise.rs:42-63`). Q = 600/350 ≈ 1.7.
-- Calculated from the actual filter coefficients at 44.1 kHz: about 8.8 dB down at 300 Hz, 6.4 dB at 1 kHz, and 23.4 dB at 5 kHz, relative to 600 Hz. The colored-noise spectrum above is not the filter transfer function.
-- A steeper receiver model may better reproduce the selectivity and ringing of a narrow CW receiver. Define its passband and stopband requirements before selecting an order or topology, then compare its sound with recordings.
+**F3. The receiver filter is too gentle.** *Open, Phase 3.*
+- A single RBJ 2nd-order bandpass (`noise.rs:42-63`), Q = 600/350 ≈ 1.7.
+- From the actual coefficients at 44.1 kHz, relative to 600 Hz: about 8.8 dB down at 300 Hz, 6.4 dB at 1 kHz, 23.4 dB at 5 kHz.
 - The `PinkNoise` stage (`:80-104`) makes almost no difference inside a passband this narrow.
 
-### F4. Callers bypass the receiver filter
+**F4. Callers bypass the receiver filter.** *Open, Phase 3.*
+- Only noise goes through the filter; callers are added unfiltered (`mixer.rs:395-408`). Narrowing `noise_bandwidth` changes only the noise, so it can't be used to pull one caller out of a pileup the way a real receiver filter can.
 
-- Only noise goes through the filter. Callers are added unfiltered (`src/audio/mixer.rs:395-408`).
-- Narrowing `noise_bandwidth` changes only the noise. A caller well outside the passband is still heard at full strength. With a real receiver, narrowing the filter is a tool for pulling out one caller from a pileup.
+**F5. No AGC.** *Open, Phase 5.*
+- Real receiver gain drops under strong signals and static crashes, then recovers according to threshold, attack, hang and release. Pronounced pumping between characters is not a universal realism requirement.
+- The mixer sums sources at fixed levels with only a soft clipper at 0.8 (`mixer.rs:440-450`).
 
-### F5. No AGC
+**F6. Noise-floor modulation was effectively zero.** *Fixed in Phase 1.*
+- `noise.rs:274-277` picked a new random target **every sample** and smoothed it with a 0.3 Hz one-pole low-pass. The targets averaged out: peak `|noise_floor|` was 0.007, so `floor_mod` stayed within 1 ± 0.0008 at QRN 0.3.
 
-- Receiver gain can decrease under strong signals and static crashes, then recover according to its threshold, attack, hang, and release behavior. Pronounced pumping between characters is not a universal realism requirement; avoid introducing exaggerated breathing as an acceptance target.
-- The current mixer sums sources at fixed levels and only has a soft clipper at 0.8 (`src/audio/mixer.rs:440-450`).
+**F7. Pops were square pulses, not impulses.** *Fixed in Phase 1.*
+- `pop_sample()` (`noise.rs:217-226`) held a flat DC step for 1–5 ms and ramped down only over the last 5 samples. After the bandpass this sounded like two clicks, one at each edge. The doc comment ("sharp attack, quick decay") didn't match.
 
-### F6. Noise-floor modulation is effectively zero
+**F8. Crashes are uniform noise bursts.** *Open, Phase 2.*
+- `maybe_start_crash()` / `crash_sample()` (`:169-214`) produce one burst of uniform white noise with exponential decay over 50–200 ms. A clustered impulsive model is a candidate for a more varied sound; its distribution, timing and level need listening comparison.
 
-- `src/audio/noise.rs:274-277` picks a new uniform random target **every sample** and passes it through a 0.3 Hz one-pole low-pass filter. The random targets average out. Measured peak `|noise_floor|` = 0.007, so `floor_mod` stays within 1 ± 0.0008 at QRN 0.3. The feature does nothing.
+**F9. Configured filter was not applied at startup.** *Fixed in Phase 1.*
+- `NoiseGenerator::new` hard-coded 600 Hz / 400 Hz (`noise.rs:138`), and the filter was only updated when an `AudioCommand::UpdateSettings` arrived. Users with a non-default tone or bandwidth heard the wrong filter until they changed a setting.
 
-### F7. Pops are square pulses, not impulses
+## 4. Completed work
 
-- `pop_sample()` (`src/audio/noise.rs:217-226`) computes `progress = 1 - min(remaining/5, 1)`. That is 0 until the last 5 samples, so a 1–5 ms pop is a **flat DC step** that ramps down only at the end. After the bandpass this sounds like two clicks, one at each edge, not a single tick.
-- The doc comment says "sharp attack, quick decay," which doesn't match the code.
+### 4.1 Phase 1: noise generator fixes (`9467a9b`)
 
-### F8. Crashes are uniform noise bursts
+| Item | Finding | Change | Regression test (`src/audio/noise.rs`) |
+|---|---|---|---|
+| 1a | F9 | `NoiseGenerator::new(sample_rate, center_hz, bandwidth_hz)`; `Mixer::new` passes `tone_frequency_hz` and `noise_bandwidth`. | `noise_filter_uses_configured_passband_at_startup` |
+| 1b | F1, F6 | Sine oscillators and the post-filter white term removed. QRN is now white excitation added to the band noise **before** the filter. Slow level drift is a gain envelope: a held random target (new target every 0.2–2 s) smoothed by the existing 0.3 Hz one-pole, giving up to ±`6 * qrn_intensity` dB. | `all_noise_effects_are_band_limited_at_supported_sample_rates`, `qrn_produces_slow_background_level_variation` |
+| 1c | F7 | Pops are random-polarity exponential excitations, time constant 0.2–0.5 ms, tail of 8 time constants, timed in seconds so energy is comparable at 44.1/48 kHz. Filter ringing is expected. | `pops_decay_immediately_with_comparable_energy_across_sample_rates` |
+| 1e | — | Test-only `NoiseGenerator::with_seed(...)` for deterministic tests and probes. | `seeded_noise_is_independent_of_buffer_boundaries` |
+| — | — | Diagnostic spectrum report (ignored by default; see §9.2). | `report_noise_spectrum` |
 
-- `maybe_start_crash()` and `crash_sample()` (`:169-214`) produce one burst of uniform white noise with exponential decay (50–200 ms).
-- A clustered impulsive model is a candidate for a more varied crash sound. Its distribution, timing, and level need listening comparison; a particular synthetic distribution is not established as the only realistic choice.
+No settings fields were added and saved values are retained.
 
-### F9. Configured filter not applied at startup
+Current noise path:
 
-- `NoiseGenerator::new` hard-codes 600 Hz / 400 Hz (`src/audio/noise.rs:138`). `Mixer::new` (`src/audio/mixer.rs:322-329`) doesn't apply settings. `update_filter` is only called from `Mixer::update_settings` (`:359-361`), which runs only when an `AudioCommand::UpdateSettings` arrives (`src/audio/engine.rs:137-138`).
-- Users with a non-default tone or bandwidth get the wrong filter until they change a setting.
+```
+white -> PinkNoise --+
+white * 0.3 * qrn ---+--> * floor_gain(qrn) --+
+crash ----------------------------------------+--> 2nd-order bandpass -> * level
+pop ------------------------------------------+
+```
 
-## 4. Proposed changes
+### 4.2 Phase 1 acceptance criteria as implemented
 
-Begin with the confirmed generator defects in Phase 1. Implement and validate the shared receiver filter from Phase 3a before final Phase 2 SNR calibration. Introduce AGC as a separate increment so its effect can be assessed. Only the initial fixes stay within `noise.rs` and `mixer.rs`; Phase 2 requires configuration, UI, and caller-strength changes.
+These are the thresholds the code actually asserts, measured at the generator output before mixer dither and clipping, after 1 s warm-up, at 44.1 and 48 kHz:
 
-### Phase 1: Fix the noise generator (F1, F6, F7, F9; F8 remains proposed)
+- All effects at maximum (crash 5/s, pop 10/s, all intensities 1.0), 600 Hz / 350 Hz: power at 5 kHz is below `center / 30` (≈14.8 dB down). The 2nd-order filter alone gives about 23.4 dB of rejection there; a 30 dB target belongs with the Phase 3 filter.
+- Same render: power at 20 Hz below `center / 100` (20 dB down), and mean within 0.0001 of zero. This is a low-frequency leakage check, not a direct measurement of the 0.3 Hz drift. **See §4.3: this check has almost no margin.**
+- 1-second RMS coefficient of variation with `qrn_intensity = 1.0` is above 0.1 and more than 3× the value at `qrn_intensity = 0`.
+- A pop decays from its first sample (no plateau), and its filtered energy at 44.1 vs 48 kHz is within a 0.9–1.1 ratio.
+- A mixer constructed at 1 kHz / 100 Hz has more than 10× the noise power at 1 kHz than at 600 Hz, before any settings update.
+- Seeded output is identical whether rendered in one buffer or in 137-sample chunks.
 
-**1a. Apply configured filter at construction (F9).**
-Change the signature to `NoiseGenerator::new(sample_rate, center_hz, bandwidth_hz)` and pass `settings.tone_frequency_hz` and `settings.noise_bandwidth` from `Mixer::new`.
+### 4.3 Known issues in completed work (Phase 1 follow-ups)
 
-**1b. Rewrite QRN (F1, F6).**
-- Remove the sine oscillators and the unfiltered white term.
-- The initial implementation uses filtered broadband QRN excitation plus held-target level drift. A later crackle refinement can split the excitation into these parts, all injected **before** the filter:
-  - **Level drift:** a smoothed random process at 0.1–1 Hz controlling the band-noise gain. Implement it as a held random target that changes at a low rate (e.g. a new target every 200–2000 ms, chosen at random), followed by a one-pole low-pass filter. That fixes F6. Depth in dB scales with `qrn_intensity`, e.g. ±`6 * qrn_intensity` dB.
-  - **Crackle:** a Poisson stream of small impulses whose rate scales with `qrn_intensity` (e.g. 0–150 per second). Amplitudes come from a heavy-tailed distribution (e.g. Pareto or log-normal) and are capped to avoid runaway peaks. Through the filter, these become the characteristic atmospheric crackle.
-- Reuse the existing smoother with a held target and sample-counted hold duration. Do not emit the slow modulation itself as an audio signal.
+Found in review on 2026-11-02. Items 1–3 are small and should be done next, before Phase 2.
 
-**1c. Pops as true impulses (F7).**
-Implemented: a random-polarity exponential excitation with a 0.2–0.5 ms time constant and an eight-time-constant tail. Timing is expressed in seconds, and filtered event energy is checked at 44.1/48 kHz. A fixed-amplitude single-sample replacement would lose energy and depend on sample rate; it would require explicit normalization. The filter may produce multiple oscillations from one excitation.
+1. **The 20 Hz check sits on the filter's own skirt.** In the probe (§9.2), background-only renders measure −19.3 dB (44.1 kHz) and −19.7 dB (48 kHz) at 20 Hz, which would fail the 20 dB threshold. The test passes only because it uses the heavy-effects render (−23.3 / −23.5 dB). Any change in how many random numbers are drawn, such as adding the crackle stream, could flip it. Fix: compare against a render of the same white excitation through the same filter, or replace it with the mean check plus a dedicated long-window low-frequency measurement.
+2. **Doc/test threshold mismatch.** The original proposal said "at least 15 dB" at 5 kHz; the code asserts `center / 30` (14.8 dB). §4.2 now states the code's value. Either keep that, or change the divisor to 31.6 if a true 15 dB is wanted.
+3. **Noise level depends on the device sample rate.** The white excitation has a fixed variance per sample, so the noise power inside the filter scales with 1/fs: about 0.4 dB lower at 48 kHz than at 44.1 kHz, and about 3.4 dB lower at 96 kHz. `PinkNoise` uses fixed coefficients designed for 44.1 kHz, so its spectral tilt also shifts with fs. Normalize the excitation to a constant power per Hz (e.g. scale by `sqrt(fs / 44100)`) and make the pink stage rate-aware or drop it (F3 notes it barely matters in-band). **This is a prerequisite for Phase 4's ±1 dB SNR target.**
+4. **QRN is nearly inert at its default.** At `qrn_intensity = 0.3`, QRN adds about +0.3 dB of RMS (0.006301 → 0.006718 at 44.1 kHz) plus up to ±1.8 dB of slow drift. Inside the passband, the QRN white term sounds the same as raising `noise_level`. Its distinctive sound waits for the Phase 2 crackle stream. This is expected for an intermediate state; Phase 2 lands before anything is released.
+5. **Overall loudness dropped.** Total generator RMS at defaults fell from about 0.028 to about 0.007, but most of the removed energy was sub-audio or above 2 kHz. Passband noise is roughly unchanged, so caller SNR (F2) is essentially as before. The background sounds quieter and less hissy; final levels are set in Phase 4.
 
-**1d. Future refinement: crashes as impulse clusters (F8).**
-A crash event lasting 100–600 ms with an envelope (attack under 5 ms, exponential decay). Inside it, a dense Poisson stream of heavy-tailed impulses (e.g. 500–3000 per second) scaled by the envelope and `crash_intensity`.
+## 5. Remaining work (in execution order)
 
-**1e. Make tests possible.**
-Implemented: test-only `NoiseGenerator::with_seed(sample_rate, center_hz, bandwidth_hz, seed)` so tests and diagnostic probes are deterministic.
+### Phase 2: QRN character (F1 remainder, F8)
 
-**Acceptance criteria (automated tests):**
-- At the generator output, before mixer dither/clipping, seeded all-effects output at 600 Hz / 350 Hz must have at least 15 dB less power at 5 kHz than at 600 Hz, averaged over 10 s after 1 s warm-up, at both 44.1/48 kHz. The retained filter provides about 23.4 dB rejection of white excitation there; a guaranteed 30 dB target belongs with a stronger filter. This regression rejects the former unfiltered QRN path.
-- For the same seeded render, mean amplitude over 10 s is within 0.0001 of zero and power at 20 Hz is at least 20 dB below center. This detects low-frequency leakage but is not a direct spectral measurement of 0.3 Hz. Slow variation is a gain envelope, not an additive oscillator.
-- With `qrn_intensity = 1.0`, the spread of 1-second RMS values is well above the spread at `qrn_intensity = 0` (e.g. coefficient of variation more than 3× higher).
-- A pop excitation decays immediately rather than holding a rectangular plateau; its filtered energy is comparable across 44.1/48 kHz. Ringing in the filtered waveform is expected. Do not require a single waveform peak.
-- A mixer constructed at 1 kHz / 100 Hz applies that noise passband before any settings update, verified by a seeded spectral comparison against the old hard-coded 600 Hz center. Seeded rendering must also be identical across different buffer partitions.
+**2a. Crackle stream.** A Poisson stream of small impulses injected before the filter. Rate scales with `qrn_intensity` (e.g. 0–150 per second). Amplitudes come from a heavy-tailed distribution (e.g. Pareto or log-normal), capped to avoid runaway peaks. Through the filter these become atmospheric crackle. Reuse the Phase 1 pop excitation shape so energy stays consistent across sample rates. Decide whether the plain QRN white term stays once crackle exists.
 
-### Phase 2: Calibrate signal-to-noise ratio (F2)
-
-**2a. Calibrate the noise reference.**
-Define a fixed stationary-noise reference RMS in a specified 500 Hz receiver response. State the response and equivalent noise bandwidth, rather than assuming nominal bandwidth alone determines integrated noise. Caller reference strength is measured during on-frequency key-down, before QSB, AGC, dither, and clipping, with impulsive effects and drift disabled. Narrowing the actual receiver filter should reduce integrated noise without rescaling the caller.
-
-**2b. Express caller strength as SNR.**
-Add `snr_min_db` and `snr_max_db` to `SimulationSettings` using serde defaults. Initially evaluate an easier 10–35 dB reference range, with a harder 3–30 dB preset. If reference noise RMS is sigma, sine peak amplitude is `sqrt(2) * sigma * 10^(snr_db/20)`. Keep this amplitude independent of the live noise slider and current bandwidth: increasing noise should reduce actual SNR, and muting noise must not mute callers. Preserve each caller's selected strength across repeats. Legacy conversion requires explicit version/presence handling; see Section 6.
-
-**2c. Rescale the UI.**
-- The noise slider should cover a meaningful range, e.g. -20 to +10 dB around the reference, labeled in dB.
-- The caller strength sliders should be labeled as SNR in dB.
-
-**2d. Check headroom.**
-Check all five strongest simultaneous callers plus noise and capped impulsive events. Define a peak ceiling and allowed clipping behavior before finalizing levels. AGC attack is finite and does not by itself prevent initial peak overload.
+**2b. Crashes as impulse clusters.** A crash event lasting 100–600 ms with an envelope (attack under 5 ms, exponential decay). Inside it, a dense Poisson stream of heavy-tailed impulses (e.g. 500–3000 per second) scaled by the envelope and `crash_intensity`.
 
 **Acceptance criteria:**
-- With the exact reference filter and noise level, on-frequency key-down SNR measures within ±1 dB of X before AGC. At other bandwidths/noise settings, test the expected change in actual SNR rather than forcing it back to X. Test noise-off behavior independently.
-- At default settings, the weakest callers are clearly near the noise level when listening (see §5).
+- The Phase 1 band-limit, mean and partition tests still pass (after the §4.3 item 1 fix).
+- With `qrn_intensity = 1.0`, the kurtosis (peakiness) of filtered output is clearly above that of Gaussian noise, and above the value at `qrn_intensity = 0`.
+- Crackle and crash energy per event is comparable at 44.1/48 kHz.
+- Impulse amplitudes are capped; worst-case peak at maximum settings is stated.
+- Listening review per §6.
 
-### Phase 3: Receiver chain with shared filter and AGC (F3, F4, F5)
+### Phase 3: Shared receiver filter (F3, F4)
 
-**3a. Shared receiver filter.**
-Move the filter out of `NoiseGenerator` into `Mixer`. Apply it to **noise + callers**, not to the user sidetone.
-- First specify passband loss, stopband rejection, and transition width. Choose a true bandpass design implemented as second-order sections and validate the response. Independently cascading a fourth-order high-pass at 425 Hz and fourth-order low-pass at 775 Hz gives only about 7.1 dB rejection at 950 Hz relative to 600 Hz, failing the 20 dB criterion below. It is not equivalent to a Butterworth bandpass transformation.
-- Define valid cutoffs: `0 < low < high < sample_rate/2`. Current controls allow a 400 Hz center with 1,000 Hz bandwidth, so blindly using `f0 - BW/2` produces a negative cutoff. Constrain or explicitly map such combinations. Normalize in-band gain and define how settings changes preserve state or crossfade without clicks.
-- Remove the old generator filter when the shared filter takes over; avoid filtering noise twice.
+**3a. Filter design.** Move the filter out of `NoiseGenerator` into `Mixer`, and apply it to **noise + callers**, not to the user sidetone.
+- First specify passband loss and ripple, stopband rejection, and transition width. Then choose a true bandpass design implemented as cascaded second-order sections, and validate its response numerically.
+- Independently cascading a 4th-order high-pass at 425 Hz and a 4th-order low-pass at 775 Hz gives only about 7.1 dB of rejection at 950 Hz relative to 600 Hz. It is not equivalent to a Butterworth bandpass transformation.
+- **Order estimate (analytical; confirm numerically when designing):** for 600 Hz / 350 Hz, an 8th-order Butterworth bandpass (4th-order prototype) gives roughly 19 dB of rejection at +BW (950 Hz) but roughly 39 dB at −BW (250 Hz), because the bandpass response is asymmetric on a linear frequency axis. Meeting 20 dB at +BW likely needs a 10th-order Butterworth (≈24 dB) or a Chebyshev/elliptic design (decision D6).
+- Place the band edges so their **geometric** center, √(low × high), equals the tone frequency. Edges at center ± BW/2 put the geometric center at about 574 Hz for 600 Hz / 350 Hz.
+- Define valid cutoffs: `0 < low < high < sample_rate/2`. Current controls allow a 400 Hz center with 1,000 Hz bandwidth, so `f0 - BW/2` would be negative. Constrain the controls or define an explicit mapping.
+- Normalize in-band gain. Define how a settings change preserves filter state or crossfades without clicks.
+- Remove the generator's filter when the shared filter takes over; don't filter noise twice.
+- Watch for `f32` instability at narrow bandwidths. Consider computing coefficients in `f64`, or running filter state in `f64`.
 - Optional "filter shape" setting (soft / normal / sharp) to choose the order.
-- Watch for stability at narrow bandwidths with `f32`. Consider computing the coefficients in `f64` or running the filter state in `f64`.
 
-**3b. AGC.**
-After the filter, specify detector type (peak or RMS), threshold, gain limits, initial gain, and smoothing. Candidate timing is 2–5 ms attack and 150–400 ms release with explicit hang behavior; validate it by listening. Define behavior below threshold so ambient noise is not continuously boosted to the target, and define recovery after long TX/muted-RX periods. The simple `target / max(env, floor)` expression alone does not specify these behaviors.
-- Add a setting `agc: { enabled, release_ms }` with serde defaults.
-- Strong callers and crashes may reduce receiver gain, followed by controlled recovery. Avoid audible gain steps, excessive noise breathing, and unstable gain during silence; test attack overshoot separately from the release envelope.
-
-**3c. Restructure the mixer.**
-Render RX (noise + callers) into a reusable scratch buffer, filter it, apply AGC, then add the sidetone, master volume, dither and clipper. Allocate scratch storage outside the callback or reuse existing capacity. Apply RX muting at a defined stage and state whether filter/noise/AGC clocks advance while muted. Preserve caller and user segment completion events independently of audible muting.
+**3b. Mixer restructure.** Render RX (noise + callers) into a reusable scratch buffer, filter it, then add sidetone, master volume, dither and clipper (AGC slots in after the filter in Phase 5). Allocate scratch storage outside the audio callback, or reuse existing capacity.
+- Define the stage where RX muting is applied, and whether filter, noise and (later) AGC clocks advance while muted. Today noise is not generated while muted, so its state freezes, while callers keep advancing.
+- Preserve caller and user segment completion events independently of audible muting.
 
 **Acceptance criteria:**
-- With AGC disabled, a caller offset by `+BW` or `-BW` from center is attenuated by at least 20 dB compared with an on-frequency caller, for valid positive audio frequencies. Specify passband ripple/loss as well. Perform filter measurements before dither and clipping.
-- With AGC on, measure gain reduction for a strong caller and bounded recovery after it ends, against the chosen timing contract. Do not require pronounced recovery between every character.
-- Add explicit tests for sidetone level/timing, segment completion order, station completion during muted RX, TX/RX transitions, buffer partitioning, and filter changes. The baseline has Morse tests but no segment-completion tests to rely on.
+- A caller offset by ±BW from center is attenuated by at least 20 dB (or the threshold chosen in D6) relative to an on-frequency caller, for valid positive audio frequencies. Passband ripple/loss is within the chosen spec. Measure before dither and clipping.
+- Callers at the default spread edges are measured and reported. Offsets are drawn from `-frequency_spread_hz/2 .. frequency_spread_hz/2`, so the default 300 Hz spread means ±150 Hz, not ±300 Hz. Measure this loss before adjusting difficulty defaults.
+- Explicit tests for sidetone level and timing, segment completion order, station completion during muted RX, TX/RX transitions, buffer partitioning, and filter changes. The baseline has Morse tests but no segment-completion tests to rely on.
 
-**Behavior note:** caller offsets are drawn from `-frequency_spread_hz/2 .. frequency_spread_hz/2`, so the default 300 Hz spread means offsets of -150 to +150 Hz, not +/-300 Hz. Measure the chosen filter loss there before adjusting difficulty defaults.
+### Phase 4: Calibrate signal-to-noise ratio (F2)
 
-### Phase 4 (optional): Background QRM
+Depends on Phase 3 (the reference filter) and §4.3 item 3 (sample-rate normalization).
 
-The noise on a busy contest band is largely other signals: distant CQs, partial exchanges, and stations near the edge of the filter.
-- Add a QRM source of non-interactive CW stations, started at random times. Each sends short CQ or exchange fragments at random offsets (inside and outside the passband) at low SNR (e.g. -5 to +10 dB). They go through the Phase 3 filter.
-- Implement them as `ActiveStation` instances marked so their completion is not reported in `completed_stations`. That keeps the caller and QSO logic unchanged.
+**4a. Noise reference.** Define a fixed stationary-noise reference RMS in a specified receiver response (proposed: the Phase 3 filter at 500 Hz bandwidth). State its equivalent noise bandwidth rather than assuming the nominal bandwidth determines integrated noise. Measure caller reference strength during on-frequency key-down, before QSB, AGC, dither and clipping, with impulsive effects and drift disabled. Narrowing the actual receiver filter should reduce integrated noise without rescaling the caller.
+
+**4b. Caller strength as SNR.** Add `snr_min_db` and `snr_max_db` to `SimulationSettings` with serde defaults. With reference noise RMS σ, sine peak amplitude is `sqrt(2) * σ * 10^(snr_db/20)`.
+- Keep this amplitude independent of the live noise slider and the current bandwidth. Raising noise should lower actual SNR, and muting noise must not mute callers.
+- Preserve each caller's selected strength across repeats.
+- Legacy conversion needs explicit version or field-presence handling; see §7.
+
+**4c. UI.** The noise slider covers a meaningful range (e.g. −20 to +10 dB around the reference), labeled in dB. Caller strength sliders are labeled as SNR in dB.
+
+**4d. Headroom.** Check the five strongest simultaneous callers plus noise and capped impulsive events. Define a peak ceiling and allowed clipping before finalizing levels. AGC attack is finite and does not by itself prevent initial peak overload.
+
+**Acceptance criteria:**
+- With the reference filter and noise level, on-frequency key-down SNR measures within ±1 dB of the configured value before AGC, at 44.1, 48 and 96 kHz.
+- At other bandwidths and noise settings, test the expected change in actual SNR rather than forcing it back to the configured value. Test noise-off behavior separately.
+- At default settings, the weakest callers are clearly near the noise level when listening (§6).
+
+### Phase 5: AGC (F5)
+
+After the filter, specify detector type (peak or RMS), threshold, gain limits, initial gain and smoothing. Candidate timing: 2–5 ms attack, 150–400 ms release, with explicit hang behavior; validate by listening.
+- Define behavior below threshold so ambient noise is not continuously boosted to the target. Define recovery after long TX or muted-RX periods. A bare `target / max(env, floor)` expression doesn't specify these.
+- Setting `agc: { enabled, release_ms }` with serde defaults.
+- Strong callers and crashes may reduce gain, followed by controlled recovery. Avoid audible gain steps, excessive noise breathing, and unstable gain during silence.
+
+**Acceptance criteria:**
+- Measured gain reduction for a strong caller and bounded recovery after it ends, against the chosen timing contract. Attack overshoot is tested separately from the release envelope.
+- Pronounced recovery between every character is not required.
+
+### Phase 6 (optional): Background QRM
+
+The noise on a busy contest band is largely other signals: distant CQs, partial exchanges, stations near the filter edge.
+- A QRM source of non-interactive CW stations started at random times. Each sends short CQ or exchange fragments at random offsets (inside and outside the passband) at low SNR (e.g. −5 to +10 dB), through the Phase 3 filter.
+- Implement as `ActiveStation` instances flagged so their completion is not reported in `completed_stations`, leaving caller and QSO logic unchanged.
 - Settings: `qrm: { enabled, density, snr_min_db, snr_max_db }`.
 
-## 5. Validation plan
+## 6. Validation plan
 
-1. **Automated:** use seeded generators, record all parameters, discard a specified warm-up period, and report the measured stage and spectral normalization. Exercise 44.1/48 kHz, buffer boundaries, filter extremes, and mute/settings transitions. The Section 7 probe is diagnostic, not a listening-quality assertion.
-2. **Listening review:** save ~30 s WAV clips (debug-only, or a test that writes into `target/`) at defaults and at "heavy QRN" for each phase. Have experienced CW contesters compare them, ideally next to real off-air recordings of a contest band through a 400–500 Hz filter. Checklist:
-   - Has the unfiltered high-frequency hiss been removed without introducing audible transients? Some stopband energy and post-filter output dither remain; do not require mathematical zero above 2 kHz.
+1. **Automated:** seeded generators; record all parameters; discard a specified warm-up; report the measured stage and the spectral normalization. Exercise 44.1/48 kHz (and 96 kHz from Phase 4 on), buffer boundaries, filter extremes, and mute/settings transitions. The §9.2 probe is diagnostic, not a listening-quality assertion.
+2. **Listening review:** save ~30 s WAV clips (debug-only, or a test that writes into `target/`) at defaults and at "heavy QRN" for each phase. Have experienced CW contesters compare them, ideally next to real off-air recordings of a contest band through a 400–500 Hz filter (decision D10). Checklist:
+   - Is the unfiltered high-frequency hiss gone without new audible transients? Some stopband energy remains. Mixer dither is uniform (not triangular as its code comment says), about ±0.0005, added after the filter, so it is flat broadband hiss. At low `noise_level` it dominates above ~2 kHz. Don't require mathematical silence above 2 kHz.
    - Does narrowing the bandwidth make the noise sound narrower and more hollow, with ringing?
    - Are weak callers genuinely hard to copy at the low end of the default SNR range?
-   - Do crashes sound like lightning, and does the AGC pump and recover believably?
-3. **Performance:** an 8th-order filter plus AGC at 48 kHz is cheap, but confirm there are no audio dropouts on the slowest supported machine.
+   - Do crashes sound like lightning? Does the AGC pump and recover believably?
+3. **Performance:** an 8th–10th-order filter plus AGC at 48 kHz is cheap, but confirm there are no audio dropouts on the slowest supported machine.
 
-## 6. Compatibility and migration
+## 7. Compatibility and migration
 
-- The initial fixes add no settings fields and retain saved values; no config reset or migration is performed. Document the changed sound caused by removing unfiltered QRN and correcting pops.
-- Later new settings fields must support old files, but serde defaults alone cannot decide whether legacy amplitudes require conversion. Use an explicit version or detect field presence before applying defaults. Specify precedence if both amplitude and SNR settings exist, convert only once, and preserve the original configuration. Do not overwrite an intentional new SNR value with a legacy conversion.
-- The *meaning* of `qrn_intensity`, `crash_intensity` and `noise_level` changes, so existing saved values will sound different. Either bump a config version and reset the noise section to the new defaults once, or accept the change and note it in the release notes. Needs a decision (see §8).
-- Difficulty will change noticeably: lower SNR in Phase 2, filtered callers in Phase 3. Consider a short release note telling users how to restore an "easy" setup.
+Because everything ships in one release, migration runs once, from the v0.7.0 settings format straight to the final format. Intermediate phases don't need their own migration or release notes.
 
-## 7. Appendix: reproducible measurement report
+Settings whose meaning changes across the effort:
 
-The committed diagnostic test replaces the incomplete, unseeded temporary probe that produced the historical snapshot in Section 3. It reports the **current** implementation and is not expected to reproduce the old numbers exactly.
+| Setting | Changed by | Change |
+|---|---|---|
+| `qrn_intensity` | Phase 1 (done), Phase 2 | Filtered excitation plus level drift; then crackle |
+| `crash_intensity` | Phase 2 | Clustered impulses instead of one noise burst |
+| `noise_bandwidth` | Phase 3 | Now filters callers too, possibly with a different filter shape |
+| `noise_level` | Phase 4 | Becomes a dB value relative to the reference |
+| `amplitude_min` / `amplitude_max` | Phase 4 | Replaced by `snr_min_db` / `snr_max_db` |
+| new: `agc`, filter shape, (`qrm`) | Phases 3, 5, (6) | Added with serde defaults |
+
+- Old settings files must still load. Serde defaults alone can't decide whether legacy values need conversion, so use a single config version bump (or field-presence detection) and apply the D4/D8 policy once. Specify precedence if both amplitude and SNR settings exist, never overwrite an intentional new value, and keep the original file recoverable.
+- One set of release notes describes the final result: the changed noise sound, filtered callers, SNR-based strength, AGC, and how to restore an "easy" setup. Difficulty will change noticeably.
+
+## 8. Decisions needed
+
+Grouped by what they block. A proposed default is given for each open decision; "defaults fine" is a valid answer.
+
+**Resolved**
+- **D1. Release scope.** *Decided 2026-11-02:* all phases stay on `improve-noise-realism` and ship together as one release; nothing merges until complete.
+- **D7. AGC packaging.** *Resolved by D1:* AGC is its own milestone (one or more commits) on the same branch, after the receiver filter.
+
+**Blocks Phase 3**
+- **D5. Filtering callers.** Always on, or behind a setting at first since it changes difficulty? *Proposed: behind a setting, default on.*
+- **D6. Filter spec.** Keep "≥20 dB at ±BW" (likely 10th-order Butterworth, or Chebyshev), or loosen it? *Proposed: keep 20 dB; choose order numerically.*
+
+**Blocks Phase 4**
+- **D2. Reference bandwidth.** Define SNR in a 500 Hz receiver response, and turn `noise_level` into a dB slider? *Proposed: yes to both.*
+- **D3. Default SNR range.** 10–35 dB (easier) or 3–30 dB? Note that 3 dB in 500 Hz is still fairly easy copy for experienced operators. *Proposed: 10–35 dB default, with "contest" (3–30 dB) and "expert" (about 0–20 dB) presets.*
+- **D4. Legacy `amplitude_min`/`amplitude_max`.** Convert to SNR automatically once, or deprecate them and switch to new defaults? *Proposed: deprecate and switch to new defaults, with a release note.*
+- **D8. Settings migration for the noise section.** Reset once for existing users, or keep their values under the new meaning? *Proposed: one-time reset of the noise section via a config version bump.*
+
+**Cross-cutting**
+- **D9. QRM (Phase 6).** Part of this release, or a separate effort after it merges? Including it delays the release; leaving it out means the "realistic band" release still has no off-frequency signals. *Proposed: separate effort after this branch merges, unless listening reviews say the band sounds empty without it.*
+- **D10. Reference recordings.** Do we have, or can we get, licensed off-air contest recordings as a listening benchmark?
+
+## 9. Appendix: measurements
+
+### 9.1 Running the probe
 
 ```sh
 cargo test --locked audio::noise::tests::report_noise_spectrum -- --ignored --nocapture
 ```
 
-The report runs four named cases: background only, background plus QRN at 0.3, full defaults, and heavy effects (crash rate 5/s, pop rate 10/s, all intensities 1.0). Every case uses seed 42, 600 Hz center, 350 Hz bandwidth, and output level 0.25, at both 44.1 and 48 kHz. Each render discards 1 s of warm-up, then measures 20 s of generator output, before mixer dither, clipping, sidetone, or callers.
+Four cases: background only, background plus QRN at 0.3, full defaults, and heavy effects (crash rate 5/s, pop rate 10/s, all intensities 1.0). Every case uses seed 42, 600 Hz center, 350 Hz bandwidth, output level 0.25, at 44.1 and 48 kHz. Each render discards 1 s of warm-up, then measures 20 s of generator output, before mixer dither, clipping, sidetone or callers.
 
-Total RMS and mean are time-domain measurements of that output. Spectral values average Hann-windowed 4096-sample DFT power over all complete frames, expressed in dB relative to the same render's 600 Hz power. These are output spectra, not dBFS, isolated component powers, or filter transfer-function measurements. In particular, total RMS must not be interpreted as audible-band RMS; listening comparisons and a separately defined audible-band measurement are still needed for perceptual claims. A dedicated low-frequency analysis with a sufficiently long window would be required to resolve sub-audio oscillations.
+Total RMS and mean are time-domain measurements. Spectral values average Hann-windowed 4096-sample DFT power over all complete frames, in dB relative to the same render's 600 Hz power. These are output spectra, not dBFS, isolated component powers, or filter transfer functions. Total RMS is not audible-band RMS. Resolving sub-audio oscillations would need a separate, longer-window analysis.
 
-The regular regression suite separately checks stopband leakage, mean offset, slow RMS variation, immediate pop decay and cross-rate energy, startup filter configuration, and buffer partition independence. The diagnostic report is ignored by default so reporting does not add work or depend on exact printed random values in CI.
+### 9.2 Results at `9467a9b`
 
-## 8. Open questions for reviewers
+Total RMS (mean is below 1e-6 in every case):
 
-1. **Default SNR range:** is 3–30 dB right for the target audience, or should the default lean easier (e.g. 10–35 dB), with "contest realistic" as a preset?
-2. **Filtering callers (Phase 3a):** should this be always on, or behind a setting at first, since it changes difficulty?
-3. **Settings migration:** reset the noise settings once for existing users, or keep their values under the new meaning?
-4. **Legacy amplitude fields:** convert `amplitude_min` and `amplitude_max` to SNR automatically, or deprecate them and switch to new defaults?
-5. **Phase 4 (QRM):** in scope for this effort, or a separate issue?
-6. **Reference recordings:** do we have, or can we get, licensed off-air contest recordings to use as a listening benchmark?
+| Case | 44.1 kHz | 48 kHz |
+|---|---:|---:|
+| Background only | 0.006301 | 0.006344 |
+| Background + QRN 0.3 | 0.006718 | 0.006688 |
+| Defaults | 0.006883 | 0.007018 |
+| Heavy effects | 0.012280 | 0.011671 |
+
+Spectrum in dB relative to 600 Hz, 44.1 kHz / 48 kHz:
+
+| Freq (Hz) | Background only | Background + QRN 0.3 | Defaults | Heavy effects |
+|---:|---:|---:|---:|---:|
+| 20 | -19.34 / -19.74 | -19.99 / -19.39 | -19.63 / -20.04 | -23.29 / -23.52 |
+| 100 | -12.19 / -12.91 | -13.04 / -12.65 | -12.50 / -13.17 | -15.68 / -15.58 |
+| 300 | -5.14 / -5.45 | -5.52 / -5.43 | -4.85 / -6.31 | -6.87 / -6.64 |
+| 1000 | -8.78 / -9.74 | -9.02 / -8.36 | -7.63 / -8.65 | -7.13 / -7.95 |
+| 5000 | -32.06 / -32.21 | -30.61 / -30.29 | -30.53 / -30.45 | -25.98 / -26.02 |
+| 12000 | -46.03 / -46.17 | -42.73 / -41.78 | -42.13 / -42.61 | -35.93 / -36.16 |
+| 18000 | -57.42 / -55.66 | -51.81 / -50.11 | -51.41 / -50.66 | -43.60 / -45.57 |
+
+Compared with §3.2: at full defaults, 5 kHz went from −7.1 dB (measured relative to the 600 Hz bin's +4.7 dB, so about −11.8 dB relative) to about −30.5 dB relative. 12 and 18 kHz improved by a similar or larger margin. The unfiltered hiss path is gone. The 2nd-order filter's skirt now dominates the 20–100 Hz values (see §4.3 item 1).
