@@ -150,6 +150,20 @@ const CRACKLE_MAX_RATE: f32 = 150.0;
 /// Crackle in-band power relative to the background at `qrn_intensity = 1.0`.
 const CRACKLE_LEVEL_DB: f32 = 0.0;
 
+/// Crash in-band power relative to the background at the envelope peak of the
+/// loudest crash at `crash_intensity = 1.0`. Each crash draws a level of
+/// 0.5–1.0 times this amplitude, and amplitude scales linearly with intensity.
+const CRASH_LEVEL_DB: f32 = 20.0;
+/// Crash duration range in seconds.
+const CRASH_DURATION: std::ops::Range<f32> = 0.1..0.6;
+/// Crash attack (rise) time range in seconds.
+const CRASH_ATTACK: std::ops::Range<f32> = 0.001..0.005;
+/// Impulses per second inside a crash; each crash draws its own density.
+/// Level is calibrated per crash, so density changes texture, not loudness.
+const CRASH_IMPULSE_RATE: std::ops::Range<f32> = 500.0..3000.0;
+/// Envelope amplitude remaining at the end of a crash (about -26 dB).
+const CRASH_END_LEVEL: f32 = 0.05;
+
 /// E[min(X, cap)^2] for a Pareto variable X with minimum 1.
 fn impulse_second_moment() -> f32 {
     let (alpha, cap) = (IMPULSE_PARETO_ALPHA, IMPULSE_MAGNITUDE_CAP);
@@ -179,10 +193,14 @@ pub struct NoiseGenerator {
     // Pink noise state for more realistic HF noise coloration
     pink: PinkNoise,
 
-    // Static crash state
+    // Static crash state: a burst of impulses under an attack/decay envelope
     crash_remaining_samples: u32,
-    crash_amplitude: f32,
+    crash_elapsed_samples: u32,
+    crash_attack_samples: u32,
+    crash_envelope: f32,
     crash_decay: f32,
+    crash_impulse_rate: f32,
+    crash_scale: f32,
 
     // Pop/click state
     pop_remaining_samples: u32,
@@ -228,8 +246,12 @@ impl NoiseGenerator {
             filter,
             pink: PinkNoise::new(sample_rate),
             crash_remaining_samples: 0,
-            crash_amplitude: 0.0,
+            crash_elapsed_samples: 0,
+            crash_attack_samples: 1,
+            crash_envelope: 0.0,
             crash_decay: 0.0,
+            crash_impulse_rate: 0.0,
+            crash_scale: 0.0,
             pop_remaining_samples: 0,
             pop_amplitude: 0.0,
             pop_decay: 0.0,
@@ -251,13 +273,17 @@ impl NoiseGenerator {
             // Probability per sample
             let prob_per_sample = crash_rate / self.sample_rate as f32;
             if self.rng.random::<f32>() < prob_per_sample {
-                // Start a crash - duration 50-200ms
-                let duration_ms = self.rng.random_range(50.0..200.0);
-                self.crash_remaining_samples =
-                    (duration_ms * self.sample_rate as f32 / 1000.0) as u32;
-                self.crash_amplitude = crash_intensity * self.rng.random_range(0.5..1.0);
-                // Decay rate so amplitude reaches ~10% at end
-                self.crash_decay = (0.1_f32).powf(1.0 / self.crash_remaining_samples as f32);
+                let fs = self.sample_rate as f32;
+                let duration = self.rng.random_range(CRASH_DURATION);
+                self.crash_remaining_samples = (duration * fs).ceil() as u32;
+                self.crash_elapsed_samples = 0;
+                self.crash_attack_samples =
+                    ((self.rng.random_range(CRASH_ATTACK) * fs).ceil() as u32).max(1);
+                self.crash_envelope = 1.0;
+                self.crash_decay = CRASH_END_LEVEL.powf(1.0 / self.crash_remaining_samples as f32);
+                self.crash_impulse_rate = self.rng.random_range(CRASH_IMPULSE_RATE);
+                let level = crash_intensity * self.rng.random_range(0.5..1.0);
+                self.crash_scale = level * impulse_scale(CRASH_LEVEL_DB, self.crash_impulse_rate);
             }
         }
     }
@@ -282,17 +308,19 @@ impl NoiseGenerator {
         }
     }
 
-    /// Generate crash sample (filtered noise burst)
+    /// Generate crash sample: a dense impulse burst under a fast-attack,
+    /// exponentially decaying envelope.
     fn crash_sample(&mut self) -> f32 {
-        if self.crash_remaining_samples > 0 {
-            self.crash_remaining_samples -= 1;
-            let noise: f32 = self.rng.random_range(-1.0..1.0);
-            let sample = noise * self.crash_amplitude * self.excitation_scale;
-            self.crash_amplitude *= self.crash_decay;
-            sample
-        } else {
-            0.0
+        if self.crash_remaining_samples == 0 {
+            return 0.0;
         }
+        self.crash_remaining_samples -= 1;
+        self.crash_elapsed_samples += 1;
+        let attack =
+            (self.crash_elapsed_samples as f32 / self.crash_attack_samples as f32).min(1.0);
+        let scale = self.crash_scale * self.crash_envelope * attack;
+        self.crash_envelope *= self.crash_decay;
+        self.impulse(self.crash_impulse_rate, scale)
     }
 
     /// Generate pop/click sample
@@ -599,6 +627,57 @@ mod tests {
             assert!((calm - 3.0).abs() < 0.2, "background should be Gaussian");
             assert!(default > 6.0 && heavy > 6.0, "crackle should be impulsive");
         }
+    }
+
+    #[test]
+    fn crashes_attack_quickly_then_decay() {
+        let sample_rate = 48000;
+        let mut generator = NoiseGenerator::with_seed(sample_rate, 600.0, 350.0, 3);
+        let (mut early, mut late) = (0.0_f64, 0.0_f64);
+        for _ in 0..20 {
+            // A rate equal to the sample rate starts a crash immediately.
+            generator.maybe_start_crash(sample_rate as f32, 1.0);
+            let duration = generator.crash_remaining_samples as usize;
+            assert!(generator.crash_attack_samples as usize <= sample_rate as usize / 200);
+            let quarter = duration / 4;
+            for i in 0..duration {
+                let excitation = generator.crash_sample();
+                let power = (generator.filter.process(excitation) as f64).powi(2);
+                if i < quarter {
+                    early += power;
+                } else if i >= duration - quarter {
+                    late += power;
+                }
+            }
+            assert_eq!(
+                generator.crash_sample(),
+                0.0,
+                "crash outlasted its duration"
+            );
+        }
+        let decay = db(early / late);
+        println!("crash first vs last quarter: {decay:.1} dB");
+        assert!(decay > 10.0, "crash decay only {decay:.1} dB");
+    }
+
+    #[test]
+    fn worst_case_peak_is_bounded() {
+        // Every noise slider at its maximum, the widest passband and the
+        // highest noise level: the post-filter peak of an impulse grows with
+        // bandwidth, so this is the loudest reachable configuration.
+        let settings = NoiseSettings {
+            crash_rate: 2.0,
+            crash_intensity: 1.0,
+            pop_rate: 10.0,
+            pop_intensity: 1.0,
+            qrn_intensity: 1.0,
+        };
+        let mut generator = NoiseGenerator::with_seed(48000, 1000.0, 1000.0, 1);
+        let mut samples = vec![0.0; 48000 * 60];
+        generator.fill_buffer(&mut samples, 0.5, &settings);
+        let peak = samples.iter().fold(0.0_f32, |peak, &x| peak.max(x.abs()));
+        println!("worst-case generator peak: {peak:.2}");
+        assert!(peak.is_finite() && peak < 8.0, "peak {peak}");
     }
 
     #[test]
