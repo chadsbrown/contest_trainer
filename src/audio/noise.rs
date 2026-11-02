@@ -122,12 +122,57 @@ impl PinkNoise {
     }
 }
 
+// Impulsive static (crackle and crashes)
+//
+// Impulsive sources are single-sample impulses with random polarity and
+// Pareto-distributed (heavy-tailed) magnitudes, injected before the receiver
+// filter, which turns each one into a short ringing tick. Each impulse is
+// scaled by fs / REFERENCE_SAMPLE_RATE so its continuous-time area, and hence
+// its filtered waveform, is independent of the device sample rate.
+//
+// A stream of impulses at `rate` per second with E[a^2] has the same in-band
+// power as white noise of variance `rate * E[a^2] / REFERENCE_SAMPLE_RATE`
+// (at the reference rate). Levels below are therefore given as white-noise
+// variances relative to the background, independent of impulse density.
+
+/// Equivalent white-noise variance of the background band noise, measured
+/// through the pink stage at 600 Hz (it is ~1.7 dB higher at the low edge of
+/// the default passband and ~1.3 dB lower at the high edge).
+const BACKGROUND_WHITE_VARIANCE: f32 = 0.03;
+/// Pareto tail index for impulse magnitudes; above 2 so the variance is set
+/// by the distribution rather than the cap.
+const IMPULSE_PARETO_ALPHA: f32 = 3.0;
+/// Largest impulse magnitude, as a multiple of the smallest.
+const IMPULSE_MAGNITUDE_CAP: f32 = 10.0;
+
+/// Crackle impulses per second at `qrn_intensity = 1.0` (rate scales linearly).
+const CRACKLE_MAX_RATE: f32 = 150.0;
+/// Crackle in-band power relative to the background at `qrn_intensity = 1.0`.
+const CRACKLE_LEVEL_DB: f32 = 0.0;
+
+/// E[min(X, cap)^2] for a Pareto variable X with minimum 1.
+fn impulse_second_moment() -> f32 {
+    let (alpha, cap) = (IMPULSE_PARETO_ALPHA, IMPULSE_MAGNITUDE_CAP);
+    alpha / (alpha - 2.0) * (1.0 - cap.powf(2.0 - alpha)) + cap.powf(2.0 - alpha)
+}
+
+/// Minimum impulse magnitude giving a stream at `rate` the same in-band power
+/// as the background raised by `level_db`.
+fn impulse_scale(level_db: f32, rate: f32) -> f32 {
+    let variance = BACKGROUND_WHITE_VARIANCE * 10.0_f32.powf(level_db / 10.0);
+    (variance * REFERENCE_SAMPLE_RATE / (rate * impulse_second_moment())).sqrt()
+}
+
 /// Generates band noise with realistic static, crashes, and pops
 pub struct NoiseGenerator {
     rng: SmallRng,
     sample_rate: u32,
     /// sqrt(sample_rate / REFERENCE_SAMPLE_RATE), applied to white excitation
     excitation_scale: f32,
+    /// sample_rate / REFERENCE_SAMPLE_RATE, applied to single-sample impulses
+    impulse_scale: f32,
+    /// Minimum crackle impulse magnitude (see CRACKLE_LEVEL_DB)
+    crackle_scale: f32,
 
     // Bandpass filter for realistic receiver noise
     filter: BiquadFilter,
@@ -178,6 +223,8 @@ impl NoiseGenerator {
             rng,
             sample_rate,
             excitation_scale: (sample_rate as f32 / REFERENCE_SAMPLE_RATE).sqrt(),
+            impulse_scale: sample_rate as f32 / REFERENCE_SAMPLE_RATE,
+            crackle_scale: impulse_scale(CRACKLE_LEVEL_DB, CRACKLE_MAX_RATE),
             filter,
             pink: PinkNoise::new(sample_rate),
             crash_remaining_samples: 0,
@@ -260,13 +307,27 @@ impl NoiseGenerator {
         }
     }
 
-    /// Generate a broadband QRN excitation; the receiver filter must process it.
-    fn qrn_sample(&mut self, qrn_intensity: f32) -> f32 {
+    /// With probability `rate / sample_rate`, a random-polarity impulse whose
+    /// magnitude is `scale` times a capped Pareto variable; otherwise zero.
+    fn impulse(&mut self, rate: f32, scale: f32) -> f32 {
+        if self.rng.random::<f32>() >= rate / self.sample_rate as f32 {
+            return 0.0;
+        }
+        let uniform: f32 = self.rng.random();
+        let magnitude = (1.0 - uniform)
+            .powf(-1.0 / IMPULSE_PARETO_ALPHA)
+            .min(IMPULSE_MAGNITUDE_CAP);
+        let polarity = if self.rng.random::<bool>() { 1.0 } else { -1.0 };
+        polarity * magnitude * scale * self.impulse_scale
+    }
+
+    /// Atmospheric crackle: a sparse impulse stream whose rate, and therefore
+    /// in-band power, scales with QRN intensity.
+    fn crackle_sample(&mut self, qrn_intensity: f32) -> f32 {
         if qrn_intensity <= 0.0 {
             return 0.0;
         }
-
-        qrn_intensity * self.rng.random_range(-0.3..0.3) * self.excitation_scale
+        self.impulse(qrn_intensity * CRACKLE_MAX_RATE, self.crackle_scale)
     }
 
     fn noise_floor_gain(&mut self, qrn_intensity: f32) -> f32 {
@@ -295,13 +356,16 @@ impl NoiseGenerator {
         let pink = self.pink.next(white);
 
         let floor_gain = self.noise_floor_gain(settings.qrn_intensity);
-        let qrn = self.qrn_sample(settings.qrn_intensity);
+        let crackle = self.crackle_sample(settings.qrn_intensity);
 
         // Every noise source passes through the receiver bandpass. Slow level
-        // drift modulates the background, rather than adding sub-audio tones.
+        // drift is a gain on the atmospheric noise (background and crackle
+        // share the same propagation), rather than an added sub-audio tone.
         let crash = self.crash_sample();
         let pop = self.pop_sample();
-        self.filter.process((pink + qrn) * floor_gain + crash + pop) * level
+        self.filter
+            .process((pink + crackle) * floor_gain + crash + pop)
+            * level
     }
 
     /// Fill a buffer with noise samples (additive)
@@ -473,6 +537,67 @@ mod tests {
                 level.abs() < 0.75,
                 "crash level at {sample_rate} Hz: {level:+.2} dB"
             );
+        }
+    }
+
+    #[test]
+    fn impulse_streams_match_their_calibrated_white_noise_level() {
+        // A dense stream keeps the estimate's spread small; the calibration
+        // itself does not depend on the rate.
+        let (rate, level_db) = (2000.0, 6.0);
+        for sample_rate in [44100, 48000, 96000] {
+            let mut generator = NoiseGenerator::with_seed(sample_rate, 600.0, 350.0, 5);
+            let scale = impulse_scale(level_db, rate);
+            let samples = sample_rate as usize * 10;
+            let impulses: f64 = (0..samples)
+                .map(|_| {
+                    let impulse = generator.impulse(rate, scale);
+                    (generator.filter.process(impulse) as f64).powi(2)
+                })
+                .sum();
+
+            let mut white = NoiseGenerator::with_seed(sample_rate, 600.0, 350.0, 6);
+            let variance = BACKGROUND_WHITE_VARIANCE * 10.0_f32.powf(level_db / 10.0);
+            let amplitude = (3.0 * variance).sqrt() * white.excitation_scale;
+            let reference: f64 = (0..samples)
+                .map(|_| {
+                    let sample = white.rng.random_range(-1.0..1.0) * amplitude;
+                    (white.filter.process(sample) as f64).powi(2)
+                })
+                .sum();
+
+            let error = db(impulses / reference);
+            println!("impulse calibration at {sample_rate} Hz: {error:+.3} dB");
+            assert!(
+                error.abs() < 0.5,
+                "impulse level at {sample_rate} Hz: {error:+.2} dB"
+            );
+        }
+    }
+
+    #[test]
+    fn crackle_makes_qrn_impulsive() {
+        fn kurtosis(samples: &[f32]) -> f64 {
+            let n = samples.len() as f64;
+            let mean = samples.iter().map(|&x| x as f64).sum::<f64>() / n;
+            let moment = |k| {
+                samples
+                    .iter()
+                    .map(|&x| (x as f64 - mean).powi(k))
+                    .sum::<f64>()
+                    / n
+            };
+            moment(4) / moment(2).powi(2)
+        }
+        for sample_rate in [44100, 48000] {
+            let calm = kurtosis(&render(sample_rate, 10, &settings(0.0)));
+            let default = kurtosis(&render(sample_rate, 10, &settings(0.3)));
+            let heavy = kurtosis(&render(sample_rate, 10, &settings(1.0)));
+            println!(
+                "kurtosis at {sample_rate} Hz: qrn 0 {calm:.2}, 0.3 {default:.2}, 1.0 {heavy:.2}"
+            );
+            assert!((calm - 3.0).abs() < 0.2, "background should be Gaussian");
+            assert!(default > 6.0 && heavy > 6.0, "crackle should be impulsive");
         }
     }
 
