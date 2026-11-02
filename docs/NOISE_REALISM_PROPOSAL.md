@@ -1,6 +1,6 @@
 # Proposal: Realistic Band Noise and Receiver Audio
 
-- **Status:** Phase 1 (noise-generator fixes) implemented on `improve-noise-realism` in `9467a9b`. Phase 1 follow-ups and Phases 2–6 are planned (see §5).
+- **Status:** Phase 1 (noise-generator fixes, `9467a9b`) and its follow-ups (§4.2) implemented on `improve-noise-realism`. Phases 2–6 are planned (see §5).
 - **Delivery:** all phases land on `improve-noise-realism` and ship as one release. Nothing merges to `master` until the work is complete.
 - **Last updated:** 2026-11-02 (first draft 2026-11-01)
 - **Baseline:** `master` at `b490ffb` (v0.7.0)
@@ -21,8 +21,8 @@ This is one cohesive body of work. Phases are milestones on a single branch, eac
 | Phase | Work | Findings | Status |
 |---|---|---|---|
 | 1 | Fix noise generator defects | F1, F6, F7, F9 | **Done** (`9467a9b`) |
-| 1-FU | Test robustness, doc/test threshold alignment, sample-rate normalization | §4.3 | Next |
-| 2 | QRN character: crackle stream, clustered crashes | F1 (remainder), F8 | Planned |
+| 1-FU | Test robustness, threshold alignment, sample-rate normalization | §4.2 | **Done** |
+| 2 | QRN character: crackle stream, clustered crashes | F1 (remainder), F8 | Next |
 | 3 | Shared receiver filter for noise and callers; mixer restructure | F3, F4 | Planned; needs D5, D6 |
 | 4 | Calibrate SNR; caller strength in dB | F2 | Planned; needs D2–D4, D8; depends on Phase 3 |
 | 5 | AGC | F5 | Planned |
@@ -125,35 +125,45 @@ Spectrum in dB (relative, Hann-windowed DFT averaged over 4096-sample frames):
 
 No settings fields were added and saved values are retained.
 
-Current noise path:
+### 4.2 Phase 1 follow-ups
+
+Found in review on 2026-11-02 and fixed in the follow-up commit.
+
+| Item | Change | Regression test |
+|---|---|---|
+| 20 Hz test margin | Background-only renders measure about −19.3 to −19.7 dB at 20 Hz: that is the 2nd-order filter's own skirt, so the old fixed 20 dB threshold passed only because the test used the heavy-effects render. The check now compares the heavy-effects render against a background-only render through the same filter and fails if effects add more than 3 dB of low-frequency energy. (The old QRN path put 20 Hz about 24 dB *above* that reference.) | `all_noise_effects_are_band_limited_at_supported_sample_rates` |
+| 5 kHz threshold | The original proposal said "at least 15 dB" but the code asserted `center / 30` (14.8 dB). Thresholds are now written in dB; the check is a true 15 dB. | same |
+| Sample-rate normalization | White excitation (background, QRN, crash bursts) is scaled by `sqrt(fs / 44100)` so noise power per Hz is constant. `PinkNoise` adapts its poles and gains to the device rate, keeping each stage's corner frequency and DC gain. Output at 44.1 kHz is bit-identical to `9467a9b`. | `background_level_is_independent_of_sample_rate`, `crash_level_is_independent_of_sample_rate`, `pink_noise_response_is_independent_of_sample_rate` |
+
+The size of the sample-rate error was smaller than first estimated for the background. The fixed pink coefficients made their 1/f components *louder* at higher rates, roughly cancelling the 1/fs loss of the white term. Measured background error before the fix was +0.06 dB at 48 kHz and +0.35 dB at 96 kHz. Pure-white sources had the full 1/fs dependence: crash-dominated renders were −0.24 dB at 48 kHz and −1.37 dB at 96 kHz. After the fix all of these are within ±0.11 dB. The pink-stage response matches the 44.1 kHz design within 0.1 dB up to 1.5 kHz, the highest passband edge the UI allows (it is about −0.1 dB at 3 kHz at 96 kHz).
+
+Current noise path (`s = sqrt(fs / 44100)`):
 
 ```
-white -> PinkNoise --+
-white * 0.3 * qrn ---+--> * floor_gain(qrn) --+
-crash ----------------------------------------+--> 2nd-order bandpass -> * level
-pop ------------------------------------------+
+white * s -> PinkNoise(fs) --+
+white * s * 0.3 * qrn -------+--> * floor_gain(qrn) --+
+crash (white * s) ------------------------------------+--> 2nd-order bandpass -> * level
+pop (exponential, timed in seconds) ------------------+
 ```
 
-### 4.2 Phase 1 acceptance criteria as implemented
+### 4.3 Phase 1 acceptance criteria as implemented
 
-These are the thresholds the code actually asserts, measured at the generator output before mixer dither and clipping, after 1 s warm-up, at 44.1 and 48 kHz:
+These are the thresholds the code actually asserts, measured at the generator output before mixer dither and clipping, after 1 s warm-up, at 44.1 and 48 kHz unless noted:
 
-- All effects at maximum (crash 5/s, pop 10/s, all intensities 1.0), 600 Hz / 350 Hz: power at 5 kHz is below `center / 30` (≈14.8 dB down). The 2nd-order filter alone gives about 23.4 dB of rejection there; a 30 dB target belongs with the Phase 3 filter.
-- Same render: power at 20 Hz below `center / 100` (20 dB down), and mean within 0.0001 of zero. This is a low-frequency leakage check, not a direct measurement of the 0.3 Hz drift. **See §4.3: this check has almost no margin.**
+- All effects at maximum (crash 5/s, pop 10/s, all intensities 1.0), 600 Hz / 350 Hz: power at 5 kHz at least 15 dB below center. The 2nd-order filter alone gives about 23.4 dB of rejection there; a 30 dB target belongs with the Phase 3 filter.
+- Same render: 20 Hz power relative to center no more than 3 dB above a background-only render's, and mean within 0.0001 of zero. This is a low-frequency leakage check, not a direct measurement of the 0.3 Hz drift.
+- Background-only RMS at 48 and 96 kHz within 0.2 dB of 44.1 kHz; crash-dominated RMS within 0.75 dB; pink-stage magnitude response within 0.1 dB of the 44.1 kHz design from 100 Hz to 1.5 kHz.
 - 1-second RMS coefficient of variation with `qrn_intensity = 1.0` is above 0.1 and more than 3× the value at `qrn_intensity = 0`.
 - A pop decays from its first sample (no plateau), and its filtered energy at 44.1 vs 48 kHz is within a 0.9–1.1 ratio.
 - A mixer constructed at 1 kHz / 100 Hz has more than 10× the noise power at 1 kHz than at 600 Hz, before any settings update.
 - Seeded output is identical whether rendered in one buffer or in 137-sample chunks.
 
-### 4.3 Known issues in completed work (Phase 1 follow-ups)
+### 4.4 Known characteristics of the current state
 
-Found in review on 2026-11-02. Items 1–3 are small and should be done next, before Phase 2.
+These are expected for an intermediate state and are addressed by later phases.
 
-1. **The 20 Hz check sits on the filter's own skirt.** In the probe (§9.2), background-only renders measure −19.3 dB (44.1 kHz) and −19.7 dB (48 kHz) at 20 Hz, which would fail the 20 dB threshold. The test passes only because it uses the heavy-effects render (−23.3 / −23.5 dB). Any change in how many random numbers are drawn, such as adding the crackle stream, could flip it. Fix: compare against a render of the same white excitation through the same filter, or replace it with the mean check plus a dedicated long-window low-frequency measurement.
-2. **Doc/test threshold mismatch.** The original proposal said "at least 15 dB" at 5 kHz; the code asserts `center / 30` (14.8 dB). §4.2 now states the code's value. Either keep that, or change the divisor to 31.6 if a true 15 dB is wanted.
-3. **Noise level depends on the device sample rate.** The white excitation has a fixed variance per sample, so the noise power inside the filter scales with 1/fs: about 0.4 dB lower at 48 kHz than at 44.1 kHz, and about 3.4 dB lower at 96 kHz. `PinkNoise` uses fixed coefficients designed for 44.1 kHz, so its spectral tilt also shifts with fs. Normalize the excitation to a constant power per Hz (e.g. scale by `sqrt(fs / 44100)`) and make the pink stage rate-aware or drop it (F3 notes it barely matters in-band). **This is a prerequisite for Phase 4's ±1 dB SNR target.**
-4. **QRN is nearly inert at its default.** At `qrn_intensity = 0.3`, QRN adds about +0.3 dB of RMS (0.006301 → 0.006718 at 44.1 kHz) plus up to ±1.8 dB of slow drift. Inside the passband, the QRN white term sounds the same as raising `noise_level`. Its distinctive sound waits for the Phase 2 crackle stream. This is expected for an intermediate state; Phase 2 lands before anything is released.
-5. **Overall loudness dropped.** Total generator RMS at defaults fell from about 0.028 to about 0.007, but most of the removed energy was sub-audio or above 2 kHz. Passband noise is roughly unchanged, so caller SNR (F2) is essentially as before. The background sounds quieter and less hissy; final levels are set in Phase 4.
+1. **QRN is nearly inert at its default.** At `qrn_intensity = 0.3`, QRN adds about +0.3 dB of RMS (0.006301 → 0.006718 at 44.1 kHz) plus up to ±1.8 dB of slow drift. Inside the passband, the QRN white term sounds the same as raising `noise_level`. Its distinctive sound waits for the Phase 2 crackle stream.
+2. **Overall loudness dropped.** Total generator RMS at defaults fell from about 0.028 to about 0.007, but most of the removed energy was sub-audio or above 2 kHz. Passband noise is roughly unchanged, so caller SNR (F2) is essentially as before. The background sounds quieter and less hissy; final levels are set in Phase 4.
 
 ## 5. Remaining work (in execution order)
 
@@ -164,7 +174,7 @@ Found in review on 2026-11-02. Items 1–3 are small and should be done next, be
 **2b. Crashes as impulse clusters.** A crash event lasting 100–600 ms with an envelope (attack under 5 ms, exponential decay). Inside it, a dense Poisson stream of heavy-tailed impulses (e.g. 500–3000 per second) scaled by the envelope and `crash_intensity`.
 
 **Acceptance criteria:**
-- The Phase 1 band-limit, mean and partition tests still pass (after the §4.3 item 1 fix).
+- The Phase 1 band-limit, mean, partition and sample-rate tests still pass.
 - With `qrn_intensity = 1.0`, the kurtosis (peakiness) of filtered output is clearly above that of Gaussian noise, and above the value at `qrn_intensity = 0`.
 - Crackle and crash energy per event is comparable at 44.1/48 kHz.
 - Impulse amplitudes are capped; worst-case peak at maximum settings is stated.
@@ -194,7 +204,7 @@ Found in review on 2026-11-02. Items 1–3 are small and should be done next, be
 
 ### Phase 4: Calibrate signal-to-noise ratio (F2)
 
-Depends on Phase 3 (the reference filter) and §4.3 item 3 (sample-rate normalization).
+Depends on Phase 3 (the reference filter). Generator noise is already normalized to constant power per Hz across sample rates (§4.2); the Phase 3 filter and any new excitation (Phase 2 crackle) must preserve that.
 
 **4a. Noise reference.** Define a fixed stationary-noise reference RMS in a specified receiver response (proposed: the Phase 3 filter at 500 Hz bandwidth). State its equivalent noise bandwidth rather than assuming the nominal bandwidth determines integrated noise. Measure caller reference strength during on-frequency key-down, before QSB, AGC, dither and clipping, with impulsive effects and drift disabled. Narrowing the actual receiver filter should reduce integrated noise without rescaling the caller.
 
@@ -232,7 +242,7 @@ The noise on a busy contest band is largely other signals: distant CQs, partial 
 
 ## 6. Validation plan
 
-1. **Automated:** seeded generators; record all parameters; discard a specified warm-up; report the measured stage and the spectral normalization. Exercise 44.1/48 kHz (and 96 kHz from Phase 4 on), buffer boundaries, filter extremes, and mute/settings transitions. The §9.2 probe is diagnostic, not a listening-quality assertion.
+1. **Automated:** seeded generators; record all parameters; discard a specified warm-up; report the measured stage and the spectral normalization. Exercise 44.1/48 kHz (and 96 kHz for level and response checks), buffer boundaries, filter extremes, and mute/settings transitions. The §9.2 probe is diagnostic, not a listening-quality assertion.
 2. **Listening review:** save ~30 s WAV clips (debug-only, or a test that writes into `target/`) at defaults and at "heavy QRN" for each phase. Have experienced CW contesters compare them, ideally next to real off-air recordings of a contest band through a 400–500 Hz filter (decision D10). Checklist:
    - Is the unfiltered high-frequency hiss gone without new audible transients? Some stopband energy remains. Mixer dither is uniform (not triangular as its code comment says), about ±0.0005, added after the filter, so it is flat broadband hiss. At low `noise_level` it dominates above ~2 kHz. Don't require mathematical silence above 2 kHz.
    - Does narrowing the bandwidth make the noise sound narrower and more hollow, with ringing?
@@ -292,27 +302,31 @@ Four cases: background only, background plus QRN at 0.3, full defaults, and heav
 
 Total RMS and mean are time-domain measurements. Spectral values average Hann-windowed 4096-sample DFT power over all complete frames, in dB relative to the same render's 600 Hz power. These are output spectra, not dBFS, isolated component powers, or filter transfer functions. Total RMS is not audible-band RMS. Resolving sub-audio oscillations would need a separate, longer-window analysis.
 
-### 9.2 Results at `9467a9b`
+### 9.2 Results after the Phase 1 follow-ups
+
+44.1 kHz output is bit-identical to `9467a9b`. 48 kHz values changed with sample-rate normalization; the `9467a9b` 48 kHz RMS values are kept in the third column for comparison.
 
 Total RMS (mean is below 1e-6 in every case):
 
-| Case | 44.1 kHz | 48 kHz |
-|---|---:|---:|
-| Background only | 0.006301 | 0.006344 |
-| Background + QRN 0.3 | 0.006718 | 0.006688 |
-| Defaults | 0.006883 | 0.007018 |
-| Heavy effects | 0.012280 | 0.011671 |
+| Case | 44.1 kHz | 48 kHz | 48 kHz at `9467a9b` |
+|---|---:|---:|---:|
+| Background only | 0.006301 | 0.006303 | 0.006344 |
+| Background + QRN 0.3 | 0.006718 | 0.006675 | 0.006688 |
+| Defaults | 0.006883 | 0.007005 | 0.007018 |
+| Heavy effects | 0.012280 | 0.011921 | 0.011671 |
 
 Spectrum in dB relative to 600 Hz, 44.1 kHz / 48 kHz:
 
 | Freq (Hz) | Background only | Background + QRN 0.3 | Defaults | Heavy effects |
 |---:|---:|---:|---:|---:|
-| 20 | -19.34 / -19.74 | -19.99 / -19.39 | -19.63 / -20.04 | -23.29 / -23.52 |
-| 100 | -12.19 / -12.91 | -13.04 / -12.65 | -12.50 / -13.17 | -15.68 / -15.58 |
-| 300 | -5.14 / -5.45 | -5.52 / -5.43 | -4.85 / -6.31 | -6.87 / -6.64 |
-| 1000 | -8.78 / -9.74 | -9.02 / -8.36 | -7.63 / -8.65 | -7.13 / -7.95 |
-| 5000 | -32.06 / -32.21 | -30.61 / -30.29 | -30.53 / -30.45 | -25.98 / -26.02 |
-| 12000 | -46.03 / -46.17 | -42.73 / -41.78 | -42.13 / -42.61 | -35.93 / -36.16 |
-| 18000 | -57.42 / -55.66 | -51.81 / -50.11 | -51.41 / -50.66 | -43.60 / -45.57 |
+| 20 | -19.34 / -19.67 | -19.99 / -19.35 | -19.63 / -20.01 | -23.29 / -23.70 |
+| 100 | -12.19 / -12.76 | -13.04 / -12.54 | -12.50 / -13.07 | -15.68 / -15.66 |
+| 300 | -5.14 / -5.38 | -5.52 / -5.38 | -4.85 / -6.27 | -6.87 / -6.72 |
+| 1000 | -8.78 / -9.67 | -9.02 / -8.28 | -7.63 / -8.58 | -7.13 / -7.90 |
+| 5000 | -32.06 / -32.21 | -30.61 / -30.18 | -30.53 / -30.31 | -25.98 / -25.87 |
+| 12000 | -46.03 / -46.31 | -42.73 / -41.57 | -42.13 / -42.41 | -35.93 / -35.98 |
+| 18000 | -57.42 / -55.80 | -51.81 / -49.86 | -51.41 / -50.41 | -45.57 / -43.43 |
 
-Compared with §3.2: at full defaults, 5 kHz went from −7.1 dB (measured relative to the 600 Hz bin's +4.7 dB, so about −11.8 dB relative) to about −30.5 dB relative. 12 and 18 kHz improved by a similar or larger margin. The unfiltered hiss path is gone. The 2nd-order filter's skirt now dominates the 20–100 Hz values (see §4.3 item 1).
+Run-to-run differences between the two rates (different random sequences) are typically 0.3–1 dB per bin in these single-bin estimates; they are not response differences.
+
+Compared with §3.2: at full defaults, 5 kHz went from −7.1 dB (measured relative to the 600 Hz bin's +4.7 dB, so about −11.8 dB relative) to about −30.5 dB relative. 12 and 18 kHz improved by a similar or larger margin. The unfiltered hiss path is gone. The 2nd-order filter's skirt now dominates the 20–100 Hz values (see §4.2).

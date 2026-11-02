@@ -77,29 +77,48 @@ impl BiquadFilter {
     }
 }
 
+/// Output sample rate at which noise levels were tuned. White excitation is
+/// scaled relative to this rate so noise power per Hz, and therefore the level
+/// heard through the receiver filter, does not depend on the device rate.
+const REFERENCE_SAMPLE_RATE: f32 = 44_100.0;
+
+// Kellet pink-noise approximation, designed for the reference rate.
+const PINK_POLES: [f32; 3] = [0.99765, 0.96300, 0.57000];
+const PINK_GAINS: [f32; 3] = [0.0990460, 0.2965164, 1.0526913];
+
 /// Simple pink noise generator (Kellet-style filtered white noise)
 struct PinkNoise {
-    b0: f32,
-    b1: f32,
-    b2: f32,
+    poles: [f32; 3],
+    gains: [f32; 3],
+    state: [f32; 3],
 }
 
 impl PinkNoise {
-    fn new() -> Self {
+    /// Adapts the reference-rate design to `sample_rate`, keeping each stage's
+    /// corner frequency and DC gain, so the spectral tilt is rate-independent.
+    fn new(sample_rate: u32) -> Self {
+        let ratio = REFERENCE_SAMPLE_RATE / sample_rate as f32;
+        let mut poles = PINK_POLES;
+        let mut gains = PINK_GAINS;
+        for (pole, gain) in poles.iter_mut().zip(gains.iter_mut()) {
+            let adapted = pole.powf(ratio);
+            *gain *= (1.0 - adapted) / (1.0 - *pole);
+            *pole = adapted;
+        }
         Self {
-            b0: 0.0,
-            b1: 0.0,
-            b2: 0.0,
+            poles,
+            gains,
+            state: [0.0; 3],
         }
     }
 
     fn next(&mut self, white: f32) -> f32 {
         // Lightweight approximation of 1/f noise.
-        self.b0 = 0.99765 * self.b0 + white * 0.0990460;
-        self.b1 = 0.96300 * self.b1 + white * 0.2965164;
-        self.b2 = 0.57000 * self.b2 + white * 1.0526913;
+        for i in 0..3 {
+            self.state[i] = self.poles[i] * self.state[i] + white * self.gains[i];
+        }
         // Scale to keep level reasonable.
-        (self.b0 + self.b1 + self.b2 + white * 0.1848) * 0.05
+        (self.state[0] + self.state[1] + self.state[2] + white * 0.1848) * 0.05
     }
 }
 
@@ -107,6 +126,8 @@ impl PinkNoise {
 pub struct NoiseGenerator {
     rng: SmallRng,
     sample_rate: u32,
+    /// sqrt(sample_rate / REFERENCE_SAMPLE_RATE), applied to white excitation
+    excitation_scale: f32,
 
     // Bandpass filter for realistic receiver noise
     filter: BiquadFilter,
@@ -156,8 +177,9 @@ impl NoiseGenerator {
         Self {
             rng,
             sample_rate,
+            excitation_scale: (sample_rate as f32 / REFERENCE_SAMPLE_RATE).sqrt(),
             filter,
-            pink: PinkNoise::new(),
+            pink: PinkNoise::new(sample_rate),
             crash_remaining_samples: 0,
             crash_amplitude: 0.0,
             crash_decay: 0.0,
@@ -218,7 +240,7 @@ impl NoiseGenerator {
         if self.crash_remaining_samples > 0 {
             self.crash_remaining_samples -= 1;
             let noise: f32 = self.rng.random_range(-1.0..1.0);
-            let sample = noise * self.crash_amplitude;
+            let sample = noise * self.crash_amplitude * self.excitation_scale;
             self.crash_amplitude *= self.crash_decay;
             sample
         } else {
@@ -244,7 +266,7 @@ impl NoiseGenerator {
             return 0.0;
         }
 
-        qrn_intensity * self.rng.random_range(-0.3..0.3)
+        qrn_intensity * self.rng.random_range(-0.3..0.3) * self.excitation_scale
     }
 
     fn noise_floor_gain(&mut self, qrn_intensity: f32) -> f32 {
@@ -269,7 +291,7 @@ impl NoiseGenerator {
         self.maybe_start_pop(settings.pop_rate, settings.pop_intensity);
 
         // Generate white noise base and color it to pink (closer to HF band noise)
-        let white: f32 = self.rng.random_range(-1.0..1.0);
+        let white: f32 = self.rng.random_range(-1.0..1.0) * self.excitation_scale;
         let pink = self.pink.next(white);
 
         let floor_gain = self.noise_floor_gain(settings.qrn_intensity);
@@ -340,28 +362,117 @@ mod tests {
         total / frames as f64
     }
 
-    #[test]
-    fn all_noise_effects_are_band_limited_at_supported_sample_rates() {
-        let settings = NoiseSettings {
+    fn db(power_ratio: f64) -> f64 {
+        10.0 * power_ratio.log10()
+    }
+
+    fn rms(samples: &[f32]) -> f64 {
+        (samples.iter().map(|&x| (x as f64).powi(2)).sum::<f64>() / samples.len() as f64).sqrt()
+    }
+
+    fn heavy_effects() -> NoiseSettings {
+        NoiseSettings {
             crash_rate: 5.0,
             crash_intensity: 1.0,
             pop_rate: 10.0,
             pop_intensity: 1.0,
             qrn_intensity: 1.0,
-        };
+        }
+    }
+
+    #[test]
+    fn all_noise_effects_are_band_limited_at_supported_sample_rates() {
         for sample_rate in [44100, 48000] {
-            let samples = render(sample_rate, 10, &settings);
+            let samples = render(sample_rate, 10, &heavy_effects());
             assert!(samples.iter().all(|sample| sample.is_finite()));
             let center = spectral_power(&samples, sample_rate, 600.0);
-            let high = spectral_power(&samples, sample_rate, 5000.0);
-            let low = spectral_power(&samples, sample_rate, 20.0);
-            assert!(high < center / 30.0, "wideband hiss at {sample_rate} Hz");
+            let high = db(spectral_power(&samples, sample_rate, 5000.0) / center);
             assert!(
-                low < center / 100.0,
-                "sub-audio leakage at {sample_rate} Hz"
+                high < -15.0,
+                "wideband hiss at {sample_rate} Hz: {high:.1} dB"
             );
+
+            // The 2nd-order filter's own skirt puts 20 Hz only ~20 dB below
+            // center, so compare against plain background noise through the
+            // same filter: effects must not add low-frequency energy beyond it.
+            let reference = render(sample_rate, 10, &settings(0.0));
+            let reference_low = db(spectral_power(&reference, sample_rate, 20.0)
+                / spectral_power(&reference, sample_rate, 600.0));
+            let low = db(spectral_power(&samples, sample_rate, 20.0) / center);
+            assert!(
+                low < reference_low + 3.0,
+                "sub-audio leakage at {sample_rate} Hz: {low:.1} dB vs background {reference_low:.1} dB"
+            );
+
             let mean = samples.iter().map(|&x| x as f64).sum::<f64>() / samples.len() as f64;
             assert!(mean.abs() < 0.0001, "DC offset {mean} at {sample_rate} Hz");
+        }
+    }
+
+    #[test]
+    fn background_level_is_independent_of_sample_rate() {
+        let reference_rms = rms(&render(44100, 20, &settings(0.0)));
+        for sample_rate in [48000, 96000] {
+            let level = db((rms(&render(sample_rate, 20, &settings(0.0))) / reference_rms).powi(2));
+            println!("background at {sample_rate} Hz: {level:+.3} dB");
+            assert!(
+                level.abs() < 0.2,
+                "level at {sample_rate} Hz: {level:+.2} dB"
+            );
+        }
+    }
+
+    #[test]
+    fn pink_noise_response_is_independent_of_sample_rate() {
+        // Exact magnitude response of the pink stage at an audio frequency.
+        // With excitation normalized to constant power per Hz, matching
+        // responses means matching noise spectra.
+        fn response(pink: &PinkNoise, sample_rate: u32, frequency: f64) -> f64 {
+            let omega = std::f64::consts::TAU * frequency / sample_rate as f64;
+            let (mut re, mut im) = (0.1848, 0.0);
+            for (&pole, &gain) in pink.poles.iter().zip(&pink.gains) {
+                // gain / (1 - pole * e^{-j omega})
+                let (dr, di) = (1.0 - pole as f64 * omega.cos(), pole as f64 * omega.sin());
+                let scale = gain as f64 / (dr * dr + di * di);
+                re += scale * dr;
+                im -= scale * di;
+            }
+            0.05 * (re * re + im * im).sqrt()
+        }
+        let reference = PinkNoise::new(44100);
+        for sample_rate in [48000, 96000] {
+            let pink = PinkNoise::new(sample_rate);
+            // Receiver passbands lie below ~1.5 kHz. Matching is approximate
+            // for the fastest stage well above that (about -0.1 dB at 3 kHz).
+            for frequency in [100.0, 300.0, 600.0, 1000.0, 1500.0] {
+                let difference = db((response(&pink, sample_rate, frequency)
+                    / response(&reference, 44100, frequency))
+                .powi(2));
+                assert!(
+                    difference.abs() < 0.1,
+                    "pink response at {frequency} Hz, {sample_rate} Hz rate: {difference:+.3} dB"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn crash_level_is_independent_of_sample_rate() {
+        // Back-to-back crashes so the render averages over many events; crash
+        // bursts are white excitation and must be scaled like the background.
+        let crashes = NoiseSettings {
+            crash_rate: 100.0,
+            crash_intensity: 1.0,
+            ..settings(0.0)
+        };
+        let reference_rms = rms(&render(44100, 20, &crashes));
+        for sample_rate in [48000, 96000] {
+            let level = db((rms(&render(sample_rate, 20, &crashes)) / reference_rms).powi(2));
+            println!("crashes at {sample_rate} Hz: {level:+.3} dB");
+            assert!(
+                level.abs() < 0.75,
+                "crash level at {sample_rate} Hz: {level:+.2} dB"
+            );
         }
     }
 
