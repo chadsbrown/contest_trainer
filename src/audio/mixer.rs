@@ -323,7 +323,11 @@ impl Mixer {
         Self {
             stations: Vec::new(),
             segmented_user_station: None,
-            noise: NoiseGenerator::new(sample_rate),
+            noise: NoiseGenerator::new(
+                sample_rate,
+                settings.tone_frequency_hz,
+                settings.noise_bandwidth,
+            ),
             settings,
         }
     }

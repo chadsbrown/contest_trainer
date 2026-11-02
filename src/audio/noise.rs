@@ -121,21 +121,32 @@ pub struct NoiseGenerator {
     // Pop/click state
     pop_remaining_samples: u32,
     pop_amplitude: f32,
+    pop_decay: f32,
 
-    // QRN (atmospheric) state - slow rumbling variations
-    qrn_phase: f32,
-    qrn_frequency: f32,
-    qrn_mod_phase: f32,
-
-    // Slow noise-floor modulation (AGC-like "breathing")
+    // Slow band-noise variation, independent of receiver AGC
     noise_floor: f32,
     noise_floor_alpha: f32,
+    noise_floor_target: f32,
+    noise_floor_target_remaining: u32,
 }
 
 impl NoiseGenerator {
-    pub fn new(sample_rate: u32) -> Self {
-        // Default bandpass filter centered at 600 Hz with 400 Hz bandwidth
-        let filter = BiquadFilter::new(sample_rate, 600.0, 400.0);
+    pub fn new(sample_rate: u32, center_freq: f32, bandwidth: f32) -> Self {
+        Self::with_rng(sample_rate, center_freq, bandwidth, SmallRng::from_os_rng())
+    }
+
+    #[cfg(test)]
+    pub fn with_seed(sample_rate: u32, center_freq: f32, bandwidth: f32, seed: u64) -> Self {
+        Self::with_rng(
+            sample_rate,
+            center_freq,
+            bandwidth,
+            SmallRng::seed_from_u64(seed),
+        )
+    }
+
+    fn with_rng(sample_rate: u32, center_freq: f32, bandwidth: f32, rng: SmallRng) -> Self {
+        let filter = BiquadFilter::new(sample_rate, center_freq, bandwidth);
 
         // Low cutoff (~0.3 Hz) for slow noise-floor variation
         let cutoff_hz = 0.3_f32;
@@ -143,7 +154,7 @@ impl NoiseGenerator {
             1.0 - (-2.0 * std::f32::consts::PI * cutoff_hz / sample_rate as f32).exp();
 
         Self {
-            rng: SmallRng::from_os_rng(),
+            rng,
             sample_rate,
             filter,
             pink: PinkNoise::new(),
@@ -152,11 +163,11 @@ impl NoiseGenerator {
             crash_decay: 0.0,
             pop_remaining_samples: 0,
             pop_amplitude: 0.0,
-            qrn_phase: 0.0,
-            qrn_frequency: 0.3, // Very slow oscillation
-            qrn_mod_phase: 0.0,
+            pop_decay: 0.0,
             noise_floor: 0.0,
             noise_floor_alpha,
+            noise_floor_target: 0.0,
+            noise_floor_target_remaining: 0,
         }
     }
 
@@ -187,10 +198,12 @@ impl NoiseGenerator {
         if self.pop_remaining_samples == 0 && pop_rate > 0.0 {
             let prob_per_sample = pop_rate / self.sample_rate as f32;
             if self.rng.random::<f32>() < prob_per_sample {
-                // Start a pop - very short, 1-5ms
-                let duration_ms = self.rng.random_range(1.0..5.0);
+                // A short exponential excitation, timed in seconds so its strength
+                // and shape remain comparable across output sample rates.
+                let time_constant = self.rng.random_range(0.0002..0.0005);
+                self.pop_decay = (-1.0 / (time_constant * self.sample_rate as f32)).exp();
                 self.pop_remaining_samples =
-                    (duration_ms * self.sample_rate as f32 / 1000.0) as u32;
+                    (time_constant * 8.0 * self.sample_rate as f32).ceil() as u32;
                 self.pop_amplitude = pop_intensity * self.rng.random_range(0.6..1.0);
                 // Random polarity
                 if self.rng.random::<bool>() {
@@ -217,41 +230,36 @@ impl NoiseGenerator {
     fn pop_sample(&mut self) -> f32 {
         if self.pop_remaining_samples > 0 {
             self.pop_remaining_samples -= 1;
-            // Sharp attack, quick decay
-            let progress = 1.0 - (self.pop_remaining_samples as f32 / 5.0).min(1.0);
-            self.pop_amplitude * (1.0 - progress)
+            let sample = self.pop_amplitude;
+            self.pop_amplitude *= self.pop_decay;
+            sample
         } else {
             0.0
         }
     }
 
-    /// Generate QRN (atmospheric rumble) sample
+    /// Generate a broadband QRN excitation; the receiver filter must process it.
     fn qrn_sample(&mut self, qrn_intensity: f32) -> f32 {
         if qrn_intensity <= 0.0 {
             return 0.0;
         }
 
-        // Slow-varying rumble using multiple low-frequency oscillators
-        let base_freq = self.qrn_frequency / self.sample_rate as f32;
-        self.qrn_phase += base_freq * 2.0 * std::f32::consts::PI;
-        if self.qrn_phase > 2.0 * std::f32::consts::PI {
-            self.qrn_phase -= 2.0 * std::f32::consts::PI;
+        qrn_intensity * self.rng.random_range(-0.3..0.3)
+    }
+
+    fn noise_floor_gain(&mut self, qrn_intensity: f32) -> f32 {
+        // Holding each target lets the slow smoother follow it instead of
+        // averaging independent per-sample targets almost completely to zero.
+        if self.noise_floor_target_remaining == 0 {
+            self.noise_floor_target = self.rng.random_range(-1.0..1.0);
+            let hold_seconds = self.rng.random_range(0.2..2.0);
+            self.noise_floor_target_remaining =
+                (hold_seconds * self.sample_rate as f32).ceil() as u32;
         }
-
-        // Modulation frequency for variation
-        self.qrn_mod_phase += (base_freq * 0.1) * 2.0 * std::f32::consts::PI;
-        if self.qrn_mod_phase > 2.0 * std::f32::consts::PI {
-            self.qrn_mod_phase -= 2.0 * std::f32::consts::PI;
-        }
-
-        // Combine oscillators with noise for organic feel
-        let osc1 = self.qrn_phase.sin();
-        let osc2 = (self.qrn_phase * 1.7).sin();
-        let mod_depth = 0.5 + 0.5 * self.qrn_mod_phase.sin();
-
-        let noise: f32 = self.rng.random_range(-0.3..0.3);
-
-        qrn_intensity * mod_depth * (osc1 * 0.6 + osc2 * 0.3 + noise)
+        self.noise_floor_target_remaining -= 1;
+        self.noise_floor += self.noise_floor_alpha * (self.noise_floor_target - self.noise_floor);
+        // Up to +/-6 dB of slowly varying background level at maximum QRN.
+        10.0_f32.powf(self.noise_floor * qrn_intensity * 6.0 / 20.0)
     }
 
     /// Generate a single noise sample with all effects
@@ -264,30 +272,229 @@ impl NoiseGenerator {
         let white: f32 = self.rng.random_range(-1.0..1.0);
         let pink = self.pink.next(white);
 
-        // Generate impulsive components and run them through the same bandpass
+        let floor_gain = self.noise_floor_gain(settings.qrn_intensity);
+        let qrn = self.qrn_sample(settings.qrn_intensity);
+
+        // Every noise source passes through the receiver bandpass. Slow level
+        // drift modulates the background, rather than adding sub-audio tones.
         let crash = self.crash_sample();
         let pop = self.pop_sample();
-
-        // Band-limit the combined noise to simulate the receiver CW filter
-        let filtered = self.filter.process(pink + crash + pop);
-
-        // Slow noise-floor modulation to mimic AGC/band fading
-        let target = self.rng.random_range(-1.0..1.0);
-        self.noise_floor += self.noise_floor_alpha * (target - self.noise_floor);
-        let floor_mod = 1.0 + settings.qrn_intensity * 0.4 * self.noise_floor;
-
-        let base_noise = filtered * level * floor_mod;
-
-        // Add effects
-        let qrn = self.qrn_sample(settings.qrn_intensity) * level;
-
-        base_noise + qrn
+        self.filter.process((pink + qrn) * floor_gain + crash + pop) * level
     }
 
     /// Fill a buffer with noise samples (additive)
     pub fn fill_buffer(&mut self, buffer: &mut [f32], level: f32, settings: &NoiseSettings) {
         for sample in buffer.iter_mut() {
             *sample += self.next_sample(level, settings);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings(qrn_intensity: f32) -> NoiseSettings {
+        NoiseSettings {
+            crash_rate: 0.0,
+            crash_intensity: 0.0,
+            pop_rate: 0.0,
+            pop_intensity: 0.0,
+            qrn_intensity,
+        }
+    }
+
+    fn render(sample_rate: u32, seconds: usize, settings: &NoiseSettings) -> Vec<f32> {
+        let mut generator = NoiseGenerator::with_seed(sample_rate, 600.0, 350.0, 42);
+        for _ in 0..sample_rate {
+            generator.next_sample(0.25, settings);
+        }
+        let mut samples = vec![0.0; sample_rate as usize * seconds];
+        generator.fill_buffer(&mut samples, 0.25, settings);
+        samples
+    }
+
+    // Average equally windowed frequency measurements over many frames so an
+    // individual random spectral null cannot decide the regression result.
+    fn spectral_power(samples: &[f32], sample_rate: u32, frequency: f64) -> f64 {
+        let n = 4096;
+        let weights: Vec<_> = (0..n)
+            .map(|i| {
+                let window = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos();
+                let phase = std::f64::consts::TAU * frequency * i as f64 / sample_rate as f64;
+                (window * phase.cos(), window * phase.sin())
+            })
+            .collect();
+        let mut total = 0.0;
+        let mut frames = 0;
+        for frame in samples.chunks_exact(n) {
+            let (mut re, mut im) = (0.0, 0.0);
+            for (&sample, &(cos, sin)) in frame.iter().zip(&weights) {
+                re += sample as f64 * cos;
+                im += sample as f64 * sin;
+            }
+            total += re * re + im * im;
+            frames += 1;
+        }
+        assert!(frames > 0);
+        total / frames as f64
+    }
+
+    #[test]
+    fn all_noise_effects_are_band_limited_at_supported_sample_rates() {
+        let settings = NoiseSettings {
+            crash_rate: 5.0,
+            crash_intensity: 1.0,
+            pop_rate: 10.0,
+            pop_intensity: 1.0,
+            qrn_intensity: 1.0,
+        };
+        for sample_rate in [44100, 48000] {
+            let samples = render(sample_rate, 10, &settings);
+            assert!(samples.iter().all(|sample| sample.is_finite()));
+            let center = spectral_power(&samples, sample_rate, 600.0);
+            let high = spectral_power(&samples, sample_rate, 5000.0);
+            let low = spectral_power(&samples, sample_rate, 20.0);
+            assert!(high < center / 30.0, "wideband hiss at {sample_rate} Hz");
+            assert!(
+                low < center / 100.0,
+                "sub-audio leakage at {sample_rate} Hz"
+            );
+            let mean = samples.iter().map(|&x| x as f64).sum::<f64>() / samples.len() as f64;
+            assert!(mean.abs() < 0.0001, "DC offset {mean} at {sample_rate} Hz");
+        }
+    }
+
+    #[test]
+    fn qrn_produces_slow_background_level_variation() {
+        fn variation(samples: &[f32], sample_rate: u32) -> f64 {
+            let levels: Vec<_> = samples
+                .chunks_exact(sample_rate as usize)
+                .map(|window| {
+                    (window.iter().map(|&x| (x as f64).powi(2)).sum::<f64>() / window.len() as f64)
+                        .sqrt()
+                })
+                .collect();
+            let mean = levels.iter().sum::<f64>() / levels.len() as f64;
+            (levels
+                .iter()
+                .map(|level| (level - mean).powi(2))
+                .sum::<f64>()
+                / levels.len() as f64)
+                .sqrt()
+                / mean
+        }
+        for sample_rate in [44100, 48000] {
+            let steady = variation(&render(sample_rate, 30, &settings(0.0)), sample_rate);
+            let drifting = variation(&render(sample_rate, 30, &settings(1.0)), sample_rate);
+            assert!(drifting > 0.1 && drifting > steady * 3.0);
+        }
+    }
+
+    #[test]
+    fn seeded_noise_is_independent_of_buffer_boundaries() {
+        let settings = NoiseSettings::default();
+        let mut whole = NoiseGenerator::with_seed(48000, 800.0, 250.0, 17);
+        let mut chunked = NoiseGenerator::with_seed(48000, 800.0, 250.0, 17);
+        let mut expected = vec![0.0; 48000];
+        let mut actual = expected.clone();
+        whole.fill_buffer(&mut expected, 0.25, &settings);
+        for chunk in actual.chunks_mut(137) {
+            chunked.fill_buffer(chunk, 0.25, &settings);
+        }
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn pops_decay_immediately_with_comparable_energy_across_sample_rates() {
+        let mut energies = Vec::new();
+        for sample_rate in [44100, 48000] {
+            let mut generator = NoiseGenerator::with_seed(sample_rate, 600.0, 350.0, 9);
+            // Force an event through the actual event setup rather than manually
+            // supplying a decay coefficient in the test.
+            generator.maybe_start_pop(sample_rate as f32, 1.0);
+            let initial = generator.pop_amplitude.abs();
+            let first = generator.pop_sample();
+            let second = generator.pop_sample();
+            assert_eq!(first.abs(), initial);
+            assert!(second.abs() < first.abs());
+            let mut energy = 0.0_f64;
+            for sample in [first, second] {
+                energy += (generator.filter.process(sample) as f64).powi(2);
+            }
+            for _ in 0..sample_rate / 50 {
+                let sample = generator.pop_sample();
+                let filtered = generator.filter.process(sample);
+                energy += (filtered as f64).powi(2);
+            }
+            assert_eq!(generator.pop_sample(), 0.0);
+            energies.push(energy / sample_rate as f64);
+        }
+        let ratio = energies[0] / energies[1];
+        assert!((0.9..1.1).contains(&ratio), "pop energy ratio: {ratio}");
+    }
+
+    #[test]
+    fn noise_filter_uses_configured_passband_at_startup() {
+        for sample_rate in [44100, 48000] {
+            let settings = crate::config::AudioSettings {
+                sample_rate,
+                tone_frequency_hz: 1000.0,
+                noise_bandwidth: 100.0,
+                ..crate::config::AudioSettings::default()
+            };
+            let mut mixer = crate::audio::mixer::Mixer::new(sample_rate, settings);
+            mixer.noise.rng = SmallRng::seed_from_u64(42);
+            let quiet = crate::config::NoiseSettings {
+                crash_rate: 0.0,
+                crash_intensity: 0.0,
+                pop_rate: 0.0,
+                pop_intensity: 0.0,
+                qrn_intensity: 0.0,
+            };
+            let mut samples = vec![0.0; sample_rate as usize * 4];
+            mixer.noise.fill_buffer(&mut samples, 0.25, &quiet);
+            let center = spectral_power(&samples, sample_rate, 1000.0);
+            let old_center = spectral_power(&samples, sample_rate, 600.0);
+            assert!(center > old_center * 10.0);
+        }
+    }
+
+    #[test]
+    #[ignore = "diagnostic report; run explicitly with --ignored --nocapture"]
+    fn report_noise_spectrum() {
+        let cases = [
+            ("background only", settings(0.0)),
+            ("background + QRN", settings(0.3)),
+            ("defaults", NoiseSettings::default()),
+            (
+                "heavy effects",
+                NoiseSettings {
+                    crash_rate: 5.0,
+                    crash_intensity: 1.0,
+                    pop_rate: 10.0,
+                    pop_intensity: 1.0,
+                    qrn_intensity: 1.0,
+                },
+            ),
+        ];
+        for sample_rate in [44100, 48000] {
+            println!("\n{sample_rate} Hz; seed=42; center=600 Hz; bandwidth=350 Hz; level=0.25");
+            println!("20 seconds after 1 second warm-up; generator output before mixer processing");
+            for (name, settings) in &cases {
+                let samples = render(sample_rate, 20, settings);
+                let rms = (samples.iter().map(|&x| (x as f64).powi(2)).sum::<f64>()
+                    / samples.len() as f64)
+                    .sqrt();
+                let mean = samples.iter().map(|&x| x as f64).sum::<f64>() / samples.len() as f64;
+                println!("{name}: total RMS={rms:.6}; mean={mean:.8}");
+                let center = spectral_power(&samples, sample_rate, 600.0);
+                for frequency in [20.0, 100.0, 300.0, 600.0, 1000.0, 5000.0, 12000.0, 18000.0] {
+                    let power = spectral_power(&samples, sample_rate, frequency);
+                    let relative_db = 10.0 * (power / center).log10();
+                    println!("  {frequency:7.0} Hz: {relative_db:7.2} dB relative to 600 Hz");
+                }
+            }
         }
     }
 }
