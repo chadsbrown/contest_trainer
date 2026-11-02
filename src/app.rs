@@ -894,38 +894,40 @@ impl ContestApp {
         }
     }
 
-    /// Try to spawn a tail-ender after TU
+    /// Try to spawn tail-enders after TU
     fn try_spawn_tail_ender(&mut self) {
         let contest_settings = self
             .settings
             .contest
             .settings_for_mut(self.contest.as_ref());
-        let tail_ender = self.caller_manager.try_spawn_tail_ender(
+        let responding = self.caller_manager.try_spawn_tail_ender(
             self.contest.as_ref(),
             contest_settings,
             Some(&self.settings.user.callsign),
             Some(&self.cty),
         );
 
-        let Some(params) = tail_ender else {
+        if responding.is_empty() {
             self.state = ContestState::Idle;
             return;
-        };
-
-        // Prepare the tail-ender
-        let callers = vec![ActiveCaller {
-            params: params.clone(),
-        }];
+        }
 
         // Reset for new QSO
         self.used_agn_callsign = false;
         self.used_agn_exchange = false;
         self.used_f5_callsign = false;
         self.context.reset();
-        self.context.set_callers(callers);
 
-        // Start tail-ender audio immediately (reaction_delay_ms handles the delay)
-        let _ = self.cmd_tx.send(AudioCommand::StartStation(params));
+        // Start audio for each tail-ender and build caller list
+        let callers: Vec<ActiveCaller> = responding
+            .into_iter()
+            .map(|params| {
+                let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
+                ActiveCaller { params }
+            })
+            .collect();
+
+        self.context.set_callers(callers);
         self.state = ContestState::StationsCalling;
     }
 
