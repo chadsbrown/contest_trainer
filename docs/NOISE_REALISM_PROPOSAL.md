@@ -6,6 +6,8 @@
 - **Baseline:** `master` at `b490ffb` (v0.7.0)
 - **Scope:** Phase 1 touched only `src/audio/noise.rs` and `src/audio/mixer.rs`. Later phases also touch `src/config.rs`, `src/ui/settings_panel.rs`, caller generation, and possibly station messages. All receiver processing must use the actual device sample rate.
 
+**Listening tests:** see [`NOISE_LISTENING_TEST_PLAN.md`](NOISE_LISTENING_TEST_PLAN.md) for the current test plan, results template, and how to resume.
+
 **Contents:** §1 Background · §2 Status at a glance · §3 Baseline findings · §4 Completed work · §5 Remaining work (in execution order) · §6 Validation plan · §7 Compatibility and migration · §8 Decisions needed · §9 Appendix: measurements
 
 ## 1. Background
