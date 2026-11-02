@@ -22,6 +22,7 @@ This is one cohesive body of work. Phases are milestones on a single branch, eac
 |---|---|---|---|
 | 1 | Fix noise generator defects | F1, F6, F7, F9 | **Done** (`9467a9b`) |
 | 1-FU | Test robustness, threshold alignment, sample-rate normalization | §4.2 | **Done** |
+| — | Listening clips tool | §4.5 | **Done** |
 | 2 | QRN character: crackle stream, clustered crashes | F1 (remainder), F8 | Next |
 | 3 | Shared receiver filter for noise and callers; mixer restructure | F3, F4 | Planned; needs D5, D6 |
 | 4 | Calibrate SNR; caller strength in dB | F2 | Planned; needs D2–D4, D8; depends on Phase 3 |
@@ -164,6 +165,27 @@ These are expected for an intermediate state and are addressed by later phases.
 
 1. **QRN is nearly inert at its default.** At `qrn_intensity = 0.3`, QRN adds about +0.3 dB of RMS (0.006301 → 0.006718 at 44.1 kHz) plus up to ±1.8 dB of slow drift. Inside the passband, the QRN white term sounds the same as raising `noise_level`. Its distinctive sound waits for the Phase 2 crackle stream.
 2. **Overall loudness dropped.** Total generator RMS at defaults fell from about 0.028 to about 0.007, but most of the removed energy was sub-audio or above 2 kHz. Passband noise is roughly unchanged, so caller SNR (F2) is essentially as before. The background sounds quieter and less hissy; final levels are set in Phase 4.
+3. **Overlapping callers drive the soft clipper.** In the pileup listening clips, overlapping callers peak at about 0.92, above the 0.8 soft-clip knee. Spectrograms show broadband distortion streaks reaching above 1.5 kHz while callers overlap. Phase 4d (headroom) must address this.
+
+### 4.5 Listening clips
+
+`src/audio/clips.rs` (test-only) renders seeded 30 s scenarios at 48 kHz through the real `Mixer`, including master volume, dither and clipping, and writes 16-bit mono WAVs plus a `clips.txt` manifest (revision, all settings, measured peak/RMS, pileup script) to `target/listening-clips/`:
+
+```sh
+cargo test --locked listening_clips -- --ignored --nocapture
+```
+
+| Clip | Contents |
+|---|---|
+| `01-noise-defaults` | Band noise, default settings |
+| `02-noise-background-only` | Band noise, all effects off |
+| `03-noise-max-effects` | Band noise, every noise effect at its slider maximum |
+| `04-pileup-defaults` | Scripted pileup (callers spanning amplitude 0.4–1.0 and ±140 Hz), defaults |
+| `05-pileup-max-effects` | Pileup, every noise effect at maximum |
+| `06-pileup-max-noise-level` | Pileup, `noise_level` at its maximum (0.5) |
+| `07-pileup-narrow-200hz` | Pileup, 200 Hz bandwidth (callers currently unaffected; F4) |
+
+Noise-only clips are quiet as rendered (about −46 dBFS RMS at defaults) because that is what the app plays; raise playback volume to judge noise character. A spectrogram is a useful companion, e.g. `ffmpeg -i clip.wav -lavfi showspectrumpic=s=1200x400:stop=3000 out.png`.
 
 ## 5. Remaining work (in execution order)
 
@@ -243,7 +265,7 @@ The noise on a busy contest band is largely other signals: distant CQs, partial 
 ## 6. Validation plan
 
 1. **Automated:** seeded generators; record all parameters; discard a specified warm-up; report the measured stage and the spectral normalization. Exercise 44.1/48 kHz (and 96 kHz for level and response checks), buffer boundaries, filter extremes, and mute/settings transitions. The §9.2 probe is diagnostic, not a listening-quality assertion.
-2. **Listening review:** save ~30 s WAV clips (debug-only, or a test that writes into `target/`) at defaults and at "heavy QRN" for each phase. Have experienced CW contesters compare them, ideally next to real off-air recordings of a contest band through a 400–500 Hz filter (decision D10). Checklist:
+2. **Listening review:** render the §4.5 clips at each phase, and add scenarios as phases introduce new behavior (for example, a strong caller and a crash for AGC). Have experienced CW contesters compare them, ideally next to real off-air recordings of a contest band through a 400–500 Hz filter (decision D10). Checklist:
    - Is the unfiltered high-frequency hiss gone without new audible transients? Some stopband energy remains. Mixer dither is uniform (not triangular as its code comment says), about ±0.0005, added after the filter, so it is flat broadband hiss. At low `noise_level` it dominates above ~2 kHz. Don't require mathematical silence above 2 kHz.
    - Does narrowing the bandwidth make the noise sound narrower and more hollow, with ringing?
    - Are weak callers genuinely hard to copy at the low end of the default SNR range?
