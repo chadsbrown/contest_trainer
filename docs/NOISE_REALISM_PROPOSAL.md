@@ -1,6 +1,6 @@
 # Proposal: Realistic Band Noise and Receiver Audio
 
-- **Status:** Phase 1 (noise-generator fixes, `9467a9b`) and its follow-ups (§4.2) implemented on `improve-noise-realism`. Phases 2–6 are planned (see §5).
+- **Status:** Phase 1 (noise-generator fixes) with follow-ups, the listening-clip tool, and Phase 2 (crackle and crash clusters) implemented on `improve-noise-realism`. Phase 2 tuning awaits listening review (§4.6). Phases 3–6 are planned (see §5).
 - **Delivery:** all phases land on `improve-noise-realism` and ship as one release. Nothing merges to `master` until the work is complete.
 - **Last updated:** 2026-11-02 (first draft 2026-11-01)
 - **Baseline:** `master` at `b490ffb` (v0.7.0)
@@ -21,10 +21,10 @@ This is one cohesive body of work. Phases are milestones on a single branch, eac
 | Phase | Work | Findings | Status |
 |---|---|---|---|
 | 1 | Fix noise generator defects | F1, F6, F7, F9 | **Done** (`9467a9b`) |
-| 1-FU | Test robustness, threshold alignment, sample-rate normalization | §4.2 | **Done** |
-| — | Listening clips tool | §4.5 | **Done** |
-| 2 | QRN character: crackle stream, clustered crashes | F1 (remainder), F8 | Next |
-| 3 | Shared receiver filter for noise and callers; mixer restructure | F3, F4 | Planned; needs D5, D6 |
+| 1-FU | Test robustness, threshold alignment, sample-rate normalization | §4.2 | **Done** (`089fea8`) |
+| — | Listening clips tool | §4.5 | **Done** (`4fe0f6e`) |
+| 2 | QRN character: crackle stream, clustered crashes | F1 (remainder), F8 | **Done** (`cf5a0cf`, `5fa58ab`); tuning awaits listening (D11) |
+| 3 | Shared receiver filter for noise and callers; mixer restructure | F3, F4 | Next; needs D5, D6 |
 | 4 | Calibrate SNR; caller strength in dB | F2 | Planned; needs D2–D4, D8; depends on Phase 3 |
 | 5 | AGC | F5 | Planned |
 | 6 | Background QRM (optional) | — | Needs D9 (in or out of this release) |
@@ -138,7 +138,7 @@ Found in review on 2026-11-02 and fixed in `089fea8`.
 
 The size of the sample-rate error was smaller than first estimated for the background. The fixed pink coefficients made their 1/f components *louder* at higher rates, roughly cancelling the 1/fs loss of the white term. Measured background error before the fix was +0.06 dB at 48 kHz and +0.35 dB at 96 kHz. Pure-white sources had the full 1/fs dependence: crash-dominated renders were −0.24 dB at 48 kHz and −1.37 dB at 96 kHz. After the fix all of these are within ±0.11 dB. The pink-stage response matches the 44.1 kHz design within 0.1 dB up to 1.5 kHz, the highest passband edge the UI allows (it is about −0.1 dB at 3 kHz at 96 kHz).
 
-Current noise path (`s = sqrt(fs / 44100)`):
+Noise path after the Phase 1 follow-ups (`s = sqrt(fs / 44100)`; superseded by §4.6):
 
 ```
 white * s -> PinkNoise(fs) --+
@@ -163,7 +163,7 @@ These are the thresholds the code actually asserts, measured at the generator ou
 
 These are expected for an intermediate state and are addressed by later phases.
 
-1. **QRN is nearly inert at its default.** At `qrn_intensity = 0.3`, QRN adds about +0.3 dB of RMS (0.006301 → 0.006718 at 44.1 kHz) plus up to ±1.8 dB of slow drift. Inside the passband, the QRN white term sounds the same as raising `noise_level`. Its distinctive sound waits for the Phase 2 crackle stream.
+1. ~~**QRN is nearly inert at its default.**~~ *Resolved by Phase 2 (§4.6).* After Phase 1, `qrn_intensity = 0.3` added only about +0.3 dB of RMS (0.006301 → 0.006718 at 44.1 kHz) plus up to ±1.8 dB of slow drift, and the QRN white term sounded the same as raising `noise_level`.
 2. **Overall loudness dropped.** Total generator RMS at defaults fell from about 0.028 to about 0.007, but most of the removed energy was sub-audio or above 2 kHz. Passband noise is roughly unchanged, so caller SNR (F2) is essentially as before. The background sounds quieter and less hissy; final levels are set in Phase 4.
 3. **Overlapping callers drive the soft clipper.** In the pileup listening clips, overlapping callers peak at about 0.92, above the 0.8 soft-clip knee. Spectrograms show broadband distortion streaks reaching above 1.5 kHz while callers overlap. Phase 4d (headroom) must address this.
 
@@ -187,20 +187,54 @@ cargo test --locked listening_clips -- --ignored --nocapture
 
 Noise-only clips are quiet as rendered (about −46 dBFS RMS at defaults) because that is what the app plays; raise playback volume to judge noise character. A spectrogram is a useful companion, e.g. `ffmpeg -i clip.wav -lavfi showspectrumpic=s=1200x400:stop=3000 out.png`.
 
+### 4.6 Phase 2: QRN character (F1 remainder, F8)
+
+Crackle landed in `cf5a0cf`, crash clusters in `5fa58ab`. As planned: 2a was a capped, heavy-tailed impulse stream with rate scaling with `qrn_intensity`; 2b was 100–600 ms crashes with an attack under 5 ms, exponential decay, and 500–3000 impulses per second inside. Deviations from the plan are marked **(changed)**.
+
+**Shared impulse model.** Crackle and crashes are single-sample impulses with random polarity and Pareto magnitudes (α = 3, capped at 10× the minimum), injected before the receiver filter, which rings each one into a short tick.
+- **(changed)** The plan suggested reusing the pop excitation shape. A 0.2–0.3 ms exponential has its −3 dB corner at 530–800 Hz, inside the passband, so it would have colored the crackle. Single-sample impulses are flat in band.
+- Each impulse is scaled by `fs / 44100` (linear, not square root), so its continuous-time area and filtered waveform are rate-independent.
+- Random polarity keeps the stream zero-mean, so crash envelopes add no low-frequency energy.
+- **Calibration:** a stream at `rate` per second with E[a²] has the in-band power of white noise of variance `rate · E[a²] / 44100`. Levels are therefore set in dB relative to the background (equivalent white variance 0.03 at 600 Hz, derived from the pink stage's response and matching the measured 0.0063 RMS), independent of impulse density. With α = 3 and cap 10, E[a²] = 2.8 × minimum².
+
+**2a. Crackle (`cf5a0cf`).**
+- Rate `150 · qrn_intensity` per second; in-band power equal to the background (0 dB) at `qrn_intensity = 1.0`, so about −5 dB at the default 0.3.
+- **(changed)** The QRN white-noise term is removed. QRN now means crackle plus slow level drift, and the drift gain applies to both background and crackle (same propagation).
+- At `qrn_intensity = 0` the generator draws no extra random numbers, so background-only output is bit-identical to before.
+
+**2b. Crash clusters (`5fa58ab`).**
+- Each crash draws a duration of 100–600 ms, an attack of 1–5 ms (linear rise), an impulse density of 500–3000/s, and a level of 0.5–1.0 × `crash_intensity`. The envelope decays exponentially to 0.05 (−26 dB) at the end.
+- **(changed)** Loudness: the loudest crash at `crash_intensity = 1.0` peaks at **+20 dB** in-band relative to the background (`CRASH_LEVEL_DB`). The old white burst was only about +9 dB at intensity 1.0, and at the default 0.2 it was below the background, so the scale was not preserved. Amplitude is linear in intensity, so the default 0.2 peaks at about +6 dB.
+- Loudness is calibrated per crash from its density, so density changes texture (rough grain vs smooth roar), not level.
+- Crashes are not modulated by the QRN level drift.
+
+All tuning values are named constants at the top of `src/audio/noise.rs` (`CRACKLE_*`, `CRASH_*`, `IMPULSE_*`).
+
+Current noise path (`s = sqrt(fs / 44100)`, `r = fs / 44100`):
+
+```
+white * s -> PinkNoise(fs) ---------------+
+crackle impulses * r (rate ∝ qrn) --------+--> * floor_gain(qrn) --+
+crash impulses * r * envelope ------------------------------------+--> 2nd-order bandpass -> * level
+pop (exponential, timed in seconds) ------------------------------+
+```
+
+| Acceptance criterion | Result | Test |
+|---|---|---|
+| Phase 1 band-limit, mean, partition, sample-rate tests still pass | Pass | (existing) |
+| Impulse calibration matches its white-noise target at 44.1/48/96 kHz (±0.5 dB) | +0.11 / +0.11 / +0.14 dB | `impulse_streams_match_their_calibrated_white_noise_level` |
+| Crash level independent of sample rate (±0.75 dB vs 44.1 kHz) | −0.22 dB at 48 kHz, +0.43 dB at 96 kHz | `crash_level_is_independent_of_sample_rate` |
+| Kurtosis clearly above Gaussian at QRN 0.3 and 1.0 (> 6; background ≈ 3) | 14–38 (background 2.95) | `crackle_makes_qrn_impulsive` |
+| Crash attack ≤ 5 ms, decays, ends on time | First vs last quarter: 19.7 dB | `crashes_attack_quickly_then_decay` |
+| Worst-case peak stated and bounded | See below | `worst_case_peak_is_bounded` |
+
+Both sample-rate tests were rechecked by temporarily removing the `fs / 44100` impulse factor; each failed (−0.63 dB and −0.89 dB at 48 kHz).
+
+**Worst-case peak.** At the user-reachable maximum (every noise slider at maximum, `noise_level` 0.5, 1000 Hz tone, 1000 Hz bandwidth), generator output over 60 s peaks at 2.5–4.5 across seeds and 44.1/48/96 kHz, before master volume (0.7) and the soft clipper. At the default 350 Hz bandwidth it is 1.0–1.7, and at 100 Hz bandwidth 0.3–0.5; the peak of an impulse after the filter grows with bandwidth. Sparse, loud crashes dominate. The test asserts a bound of 8. This overloads the soft clipper by design until headroom (Phase 4d) and AGC (Phase 5) exist. At defaults, listening-clip peaks rose from 0.038 to about 0.17 (the largest crackle ticks, about +31 dB over background RMS, roughly one every 20 s).
+
+**Listening review needed (D11).** Spectrograms and waveforms confirm the texture is impulsive, crashes have sharp onsets and decaying tails, and nothing runs away. Whether it *sounds* right needs ears. The main knobs are `CRACKLE_MAX_RATE`, `CRACKLE_LEVEL_DB`, `CRASH_LEVEL_DB`, `CRASH_IMPULSE_RATE`, `IMPULSE_PARETO_ALPHA` and `IMPULSE_MAGNITUDE_CAP`.
+
 ## 5. Remaining work (in execution order)
-
-### Phase 2: QRN character (F1 remainder, F8)
-
-**2a. Crackle stream.** A Poisson stream of small impulses injected before the filter. Rate scales with `qrn_intensity` (e.g. 0–150 per second). Amplitudes come from a heavy-tailed distribution (e.g. Pareto or log-normal), capped to avoid runaway peaks. Through the filter these become atmospheric crackle. Reuse the Phase 1 pop excitation shape so energy stays consistent across sample rates. Decide whether the plain QRN white term stays once crackle exists.
-
-**2b. Crashes as impulse clusters.** A crash event lasting 100–600 ms with an envelope (attack under 5 ms, exponential decay). Inside it, a dense Poisson stream of heavy-tailed impulses (e.g. 500–3000 per second) scaled by the envelope and `crash_intensity`.
-
-**Acceptance criteria:**
-- The Phase 1 band-limit, mean, partition and sample-rate tests still pass.
-- With `qrn_intensity = 1.0`, the kurtosis (peakiness) of filtered output is clearly above that of Gaussian noise, and above the value at `qrn_intensity = 0`.
-- Crackle and crash energy per event is comparable at 44.1/48 kHz.
-- Impulse amplitudes are capped; worst-case peak at maximum settings is stated.
-- Listening review per §6.
 
 ### Phase 3: Shared receiver filter (F3, F4)
 
@@ -226,7 +260,7 @@ Noise-only clips are quiet as rendered (about −46 dBFS RMS at defaults) becaus
 
 ### Phase 4: Calibrate signal-to-noise ratio (F2)
 
-Depends on Phase 3 (the reference filter). Generator noise is already normalized to constant power per Hz across sample rates (§4.2); the Phase 3 filter and any new excitation (Phase 2 crackle) must preserve that.
+Depends on Phase 3 (the reference filter). Generator noise is already normalized to constant power per Hz across sample rates (§4.2); the Phase 3 filter must preserve that (Phase 2 impulses already do; §4.6).
 
 **4a. Noise reference.** Define a fixed stationary-noise reference RMS in a specified receiver response (proposed: the Phase 3 filter at 500 Hz bandwidth). State its equivalent noise bandwidth rather than assuming the nominal bandwidth determines integrated noise. Measure caller reference strength during on-frequency key-down, before QSB, AGC, dither and clipping, with impulsive effects and drift disabled. Narrowing the actual receiver filter should reduce integrated noise without rescaling the caller.
 
@@ -280,8 +314,8 @@ Settings whose meaning changes across the effort:
 
 | Setting | Changed by | Change |
 |---|---|---|
-| `qrn_intensity` | Phase 1 (done), Phase 2 | Filtered excitation plus level drift; then crackle |
-| `crash_intensity` | Phase 2 | Clustered impulses instead of one noise burst |
+| `qrn_intensity` | Phase 1, Phase 2 (both done) | Crackle impulse rate (up to 150/s, 0 dB vs background at 1.0) plus slow level drift (±6 dB at 1.0) |
+| `crash_intensity` | Phase 2 (done) | Clustered impulses instead of one noise burst; loudest crash peaks +20 dB vs background at 1.0 (was about +9 dB) |
 | `noise_bandwidth` | Phase 3 | Now filters callers too, possibly with a different filter shape |
 | `noise_level` | Phase 4 | Becomes a dB value relative to the reference |
 | `amplitude_min` / `amplitude_max` | Phase 4 | Replaced by `snr_min_db` / `snr_max_db` |
@@ -311,6 +345,7 @@ Grouped by what they block. A proposed default is given for each open decision; 
 **Cross-cutting**
 - **D9. QRM (Phase 6).** Part of this release, or a separate effort after it merges? Including it delays the release; leaving it out means the "realistic band" release still has no off-frequency signals. *Proposed: separate effort after this branch merges, unless listening reviews say the band sounds empty without it.*
 - **D10. Reference recordings.** Do we have, or can we get, licensed off-air contest recordings as a listening benchmark?
+- **D11. Phase 2 tuning.** After listening to the §4.5 clips: are crackle density and loudness, crash loudness and texture, and the size of the largest ticks right? Adjust the named constants listed in §4.6. *Proposed: keep current values unless they sound wrong; revisit loudness after Phase 4 calibration and Phase 5 AGC.*
 
 ## 9. Appendix: measurements
 
@@ -324,7 +359,34 @@ Four cases: background only, background plus QRN at 0.3, full defaults, and heav
 
 Total RMS and mean are time-domain measurements. Spectral values average Hann-windowed 4096-sample DFT power over all complete frames, in dB relative to the same render's 600 Hz power. These are output spectra, not dBFS, isolated component powers, or filter transfer functions. Total RMS is not audible-band RMS. Resolving sub-audio oscillations would need a separate, longer-window analysis.
 
-### 9.2 Results after the Phase 1 follow-ups
+### 9.2 Results after Phase 2
+
+Background-only output is unchanged from §9.3 (QRN 0 draws no crackle). The QRN, defaults and heavy-effects cases changed with crackle and crash clusters.
+
+Total RMS (mean is below 1e-6 in every case):
+
+| Case | 44.1 kHz | 48 kHz |
+|---|---:|---:|
+| Background only | 0.006301 | 0.006303 |
+| Background + QRN 0.3 | 0.006970 | 0.007337 |
+| Defaults | 0.007216 | 0.007954 |
+| Heavy effects | 0.019205 | 0.020576 |
+
+Spectrum in dB relative to 600 Hz, 44.1 kHz / 48 kHz:
+
+| Freq (Hz) | Background only | Background + QRN 0.3 | Defaults | Heavy effects |
+|---:|---:|---:|---:|---:|
+| 20 | -19.34 / -19.67 | -20.72 / -20.29 | -20.41 / -20.60 | -27.36 / -26.67 |
+| 100 | -12.19 / -12.76 | -13.80 / -13.16 | -13.07 / -13.48 | -17.76 / -17.97 |
+| 300 | -5.14 / -5.38 | -6.32 / -5.88 | -5.73 / -6.12 | -7.79 / -8.22 |
+| 1000 | -8.78 / -9.67 | -8.90 / -8.02 | -7.52 / -8.31 | -7.42 / -7.19 |
+| 5000 | -32.06 / -32.21 | -28.69 / -27.29 | -27.81 / -28.12 | -24.13 / -24.59 |
+| 12000 | -46.03 / -46.31 | -39.38 / -38.63 | -39.01 / -38.22 | -34.69 / -33.70 |
+| 18000 | -57.42 / -55.80 | -48.67 / -46.11 | -47.78 / -46.21 | -43.72 / -41.89 |
+
+Impulses are flat (white) before the filter, while the background is pink-tilted, so cases with crackle or crashes have relatively more energy above the passband (5 kHz about −28 dB instead of −32 dB). All are still well within the 15 dB stopband check. RMS differences between rates in the impulsive cases reflect different random event sequences over 20 s (a few crashes dominate), not level differences; the calibration tests in §4.6 measure that directly.
+
+### 9.3 Results after the Phase 1 follow-ups (historical)
 
 44.1 kHz output is bit-identical to `9467a9b`. 48 kHz values changed with sample-rate normalization; the `9467a9b` 48 kHz RMS values are kept in the third column for comparison.
 
