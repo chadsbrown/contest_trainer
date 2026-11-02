@@ -13,14 +13,11 @@ pub fn export_session_stats(
     stats: &SessionStats,
 ) -> Result<String, String> {
     let now = Local::now();
-    let callsign = settings.user.callsign.trim();
-    let callsign_safe = if callsign.is_empty() {
-        "NOCALL".to_string()
-    } else {
-        callsign.to_uppercase()
-    };
-
-    let filename = format!("CWCT-{}-{}.md", callsign_safe, now.format("%Y%m%d-%H%M"));
+    let filename = format!(
+        "CWCT-{}-{}.md",
+        filename_safe_callsign(&settings.user.callsign),
+        now.format("%Y%m%d-%H%M")
+    );
 
     let filepath = if settings.user.export_directory.is_empty() {
         PathBuf::from(&filename)
@@ -192,4 +189,55 @@ fn build_markdown_content(settings: &AppSettings, stats: &SessionStats) -> Strin
     }
 
     md
+}
+
+/// Convert a callsign into a single, portable filename component.
+/// Portable/prefix separators (e.g. "K1ABC/P", "VE3/K1ABC") become '_';
+/// any other character that is not ASCII alphanumeric or '-' is also replaced.
+fn filename_safe_callsign(callsign: &str) -> String {
+    let safe: String = callsign
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if safe.chars().all(|c| c == '_') {
+        "NOCALL".to_string()
+    } else {
+        safe
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filename_safe_callsign;
+
+    #[test]
+    fn plain_callsign_uppercased() {
+        assert_eq!(filename_safe_callsign(" k1abc "), "K1ABC");
+    }
+
+    #[test]
+    fn portable_suffix_and_prefix() {
+        assert_eq!(filename_safe_callsign("K1ABC/P"), "K1ABC_P");
+        assert_eq!(filename_safe_callsign("ve3/k1abc/qrp"), "VE3_K1ABC_QRP");
+    }
+
+    #[test]
+    fn path_and_reserved_chars_replaced() {
+        assert_eq!(filename_safe_callsign("..\\K1:ABC*"), "___K1_ABC_");
+    }
+
+    #[test]
+    fn empty_or_all_invalid_falls_back() {
+        assert_eq!(filename_safe_callsign(""), "NOCALL");
+        assert_eq!(filename_safe_callsign("   "), "NOCALL");
+        assert_eq!(filename_safe_callsign("///"), "NOCALL");
+    }
 }
