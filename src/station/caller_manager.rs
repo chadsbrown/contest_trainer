@@ -213,42 +213,51 @@ impl CallerManager {
     ) -> Option<PersistentCaller> {
         let mut rng = rand::thread_rng();
 
-        // Pick a random callsign with same-country filtering
-        let max_retries = 10;
+        // Same-country filtering: `same_country_probability` is the fraction of
+        // callers that should be from the user's country. Decide up front whether
+        // this caller should be domestic or DX, then draw callsigns until one
+        // matches. Filtering is skipped if the user's country can't be determined.
+        let user_country = if self.settings.same_country_filter_enabled {
+            match (user_callsign, cty) {
+                (Some(user_call), Some(cty_db)) => {
+                    cty_db.lookup_prefix(user_call).map(|p| (p, cty_db))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let want_domestic = rng.gen::<f32>() < self.settings.same_country_probability;
+
+        // If the callsign pool can't supply a match (e.g. a domestic-only pool
+        // while DX is wanted), fall back to the last drawn callsign.
+        let max_draws = if user_country.is_some() { 200 } else { 1 };
         let mut callsign_and_exchange = None;
 
-        for _ in 0..max_retries {
+        for _ in 0..max_draws {
             let Some((callsign, exchange)) =
                 self.callsigns
                     .random(contest, self.serial_counter, contest_settings)
             else {
                 break;
             };
-            self.serial_counter += 1;
 
-            // Check if we should reject this callsign due to same-country
-            let should_reject = if self.settings.same_country_filter_enabled {
-                match (user_callsign, cty) {
-                    (Some(user_call), Some(cty_db)) => {
-                        if cty_db.same_country(user_call, &callsign) {
-                            rng.gen::<f32>() > self.settings.same_country_probability
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
+            let matches = match &user_country {
+                Some((user_prefix, cty_db)) => {
+                    let is_domestic = cty_db.lookup_prefix(&callsign).as_ref() == Some(user_prefix);
+                    is_domestic == want_domestic
                 }
-            } else {
-                false
+                None => true,
             };
 
-            if !should_reject {
-                callsign_and_exchange = Some((callsign, exchange));
+            callsign_and_exchange = Some((callsign, exchange));
+            if matches {
                 break;
             }
         }
 
         let (callsign, exchange) = callsign_and_exchange?;
+        self.serial_counter += 1;
 
         // Random parameters
         let wpm = rng.gen_range(self.settings.wpm_min..=self.settings.wpm_max);
@@ -491,6 +500,142 @@ mod tests {
             CallerResponse::from_progress(&progress),
             CallerResponse::Confused
         );
+    }
+
+    mod same_country_filter {
+        use super::super::*;
+        use crate::contest::{cqww, FileCallsignSource};
+
+        const SAMPLES: usize = 400;
+
+        fn cty() -> CtyDat {
+            CtyDat::parse(include_str!("../../data/cty.dat"))
+        }
+
+        fn manager(enabled: bool, probability: f32) -> CallerManager {
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/callsigns.txt");
+            let source = FileCallsignSource::load(path).expect("callsigns.txt (SCP) should load");
+            let settings = SimulationSettings {
+                same_country_filter_enabled: enabled,
+                same_country_probability: probability,
+                ..SimulationSettings::default()
+            };
+            CallerManager::new(Box::new(source), settings)
+        }
+
+        /// Fraction of generated callers that share a country with `user_call`
+        fn domestic_fraction(mgr: &mut CallerManager, user_call: &str, cty: &CtyDat) -> f32 {
+            let contest = cqww::make_contest();
+            let contest_settings = contest.default_settings();
+            let mut domestic = 0;
+            for _ in 0..SAMPLES {
+                let caller = mgr
+                    .create_caller(
+                        contest.as_ref(),
+                        &contest_settings,
+                        Some(user_call),
+                        Some(cty),
+                    )
+                    .expect("caller should be created");
+                if cty.same_country(user_call, &caller.params.callsign) {
+                    domestic += 1;
+                }
+            }
+            domestic as f32 / SAMPLES as f32
+        }
+
+        #[test]
+        fn probability_one_gives_only_domestic_callers() {
+            // Issue #15: NQ0K with probability 1.0 was still getting DX callers
+            let cty = cty();
+            let frac = domestic_fraction(&mut manager(true, 1.0), "NQ0K", &cty);
+            assert_eq!(frac, 1.0);
+        }
+
+        #[test]
+        fn probability_zero_gives_only_dx_callers() {
+            let cty = cty();
+            let frac = domestic_fraction(&mut manager(true, 0.0), "NQ0K", &cty);
+            assert_eq!(frac, 0.0);
+        }
+
+        #[test]
+        fn intermediate_probabilities_are_respected() {
+            let cty = cty();
+            for (p, lo, hi) in [(0.1, 0.03, 0.18), (0.5, 0.42, 0.58), (0.8, 0.72, 0.88)] {
+                let frac = domestic_fraction(&mut manager(true, p), "NQ0K", &cty);
+                assert!(
+                    (lo..=hi).contains(&frac),
+                    "p={p}: domestic fraction {frac} outside [{lo}, {hi}]"
+                );
+            }
+        }
+
+        #[test]
+        fn works_for_non_us_user() {
+            let cty = cty();
+            let frac = domestic_fraction(&mut manager(true, 1.0), "DL1ABC", &cty);
+            assert_eq!(frac, 1.0);
+        }
+
+        #[test]
+        fn disabled_filter_uses_natural_pool_mix() {
+            let cty = cty();
+            let frac = domestic_fraction(&mut manager(false, 1.0), "NQ0K", &cty);
+            assert!(frac > 0.0 && frac < 1.0, "unfiltered fraction {frac}");
+        }
+
+        /// A callsign source that only ever produces US callsigns
+        struct UsOnlySource;
+        impl CallsignSource for UsOnlySource {
+            fn random(
+                &mut self,
+                _contest: &dyn Contest,
+                _serial: u32,
+                _settings: &toml::Value,
+            ) -> Option<(String, crate::contest::Exchange)> {
+                Some(("W1AW".to_string(), crate::contest::Exchange::new(vec![])))
+            }
+        }
+
+        #[test]
+        fn falls_back_when_pool_cannot_match() {
+            // e.g. a Sweepstakes pool (US/VE only) with DX requested: still get callers
+            let cty = cty();
+            let mut mgr = CallerManager::new(
+                Box::new(UsOnlySource),
+                SimulationSettings {
+                    same_country_filter_enabled: true,
+                    same_country_probability: 0.0,
+                    ..SimulationSettings::default()
+                },
+            );
+            let contest = cqww::make_contest();
+            let caller = mgr.create_caller(
+                contest.as_ref(),
+                &contest.default_settings(),
+                Some("NQ0K"),
+                Some(&cty),
+            );
+            assert_eq!(caller.unwrap().params.callsign, "W1AW");
+        }
+
+        #[test]
+        fn serial_advances_once_per_caller() {
+            let cty = cty();
+            let mut mgr = manager(true, 1.0);
+            let contest = cqww::make_contest();
+            let contest_settings = contest.default_settings();
+            for i in 0..20 {
+                assert_eq!(mgr.serial_counter, 1 + i);
+                mgr.create_caller(
+                    contest.as_ref(),
+                    &contest_settings,
+                    Some("NQ0K"),
+                    Some(&cty),
+                );
+            }
+        }
     }
 
     #[test]

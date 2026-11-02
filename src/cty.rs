@@ -250,6 +250,7 @@ impl CtyDat {
     }
 
     /// Check if two callsigns are from the same country (matching prefix)
+    #[cfg(test)]
     pub fn same_country(&self, call1: &str, call2: &str) -> bool {
         match (self.lookup_prefix(call1), self.lookup_prefix(call2)) {
             (Some(p1), Some(p2)) => p1 == p2,

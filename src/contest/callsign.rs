@@ -1,4 +1,5 @@
 use rand::seq::SliceRandom;
+use rand::Rng;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -64,6 +65,20 @@ impl CallsignPool {
 
     /// Get a random callsign (avoiding recently used ones)
     pub fn random(&mut self) -> Option<String> {
+        // Fast path: while most of the pool is unused, pick random indices until
+        // we hit an unused callsign (avoids scanning the whole list each call).
+        if !self.callsigns.is_empty() && self.used.len() < self.callsigns.len() / 2 {
+            let mut rng = rand::thread_rng();
+            for _ in 0..16 {
+                let call = &self.callsigns[rng.gen_range(0..self.callsigns.len())];
+                if !self.used.contains(call) {
+                    let call = call.clone();
+                    self.used.insert(call.clone());
+                    return Some(call);
+                }
+            }
+        }
+
         let available: Vec<_> = self
             .callsigns
             .iter()
@@ -122,5 +137,24 @@ impl CallsignSource for FileCallsignSource {
         let callsign = self.pool.random()?;
         let exchange = contest.generate_exchange(&callsign, serial, settings);
         Some((callsign, exchange))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pool_does_not_repeat_until_exhausted() {
+        let mut pool = CallsignPool::default_pool();
+        let n = pool.callsigns.len();
+        let drawn: HashSet<String> = (0..n).map(|_| pool.random().unwrap()).collect();
+        assert_eq!(
+            drawn.len(),
+            n,
+            "every callsign drawn exactly once before reset"
+        );
+        // Pool resets and keeps producing callsigns once exhausted
+        assert!(pool.random().is_some());
     }
 }
