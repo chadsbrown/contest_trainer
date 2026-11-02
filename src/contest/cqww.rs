@@ -42,7 +42,7 @@ impl CqWwContest {
 }
 
 fn pick_rst() -> &'static str {
-    let roll = rand::thread_rng().gen_range(0..100);
+    let roll = rand::rng().random_range(0..100);
     if roll < 5 {
         "ENN"
     } else if roll < 15 {

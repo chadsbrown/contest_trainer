@@ -96,8 +96,8 @@ impl PersistentCaller {
 
     /// Set delay before next call attempt
     pub fn set_retry_delay(&mut self, min_ms: u32, max_ms: u32) {
-        let mut rng = rand::thread_rng();
-        let delay = rng.gen_range(min_ms..=max_ms);
+        let mut rng = rand::rng();
+        let delay = rng.random_range(min_ms..=max_ms);
         self.ready_at = Instant::now() + Duration::from_millis(delay as u64);
         self.state = CallerState::Waiting;
     }
@@ -168,7 +168,7 @@ impl CallerManager {
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Don't replenish too often
         if self.last_replenish.elapsed().as_millis() < 500 {
@@ -190,7 +190,7 @@ impl CallerManager {
         // Add callers if below target
         while active_in_queue < target_queue_size {
             // Probability check for adding each caller
-            if rng.gen::<f32>() > self.settings.station_probability {
+            if rng.random::<f32>() > self.settings.station_probability {
                 break;
             }
 
@@ -211,7 +211,7 @@ impl CallerManager {
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) -> Option<PersistentCaller> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Same-country filtering: `same_country_probability` is the fraction of
         // callers that should be from the user's country. Decide up front whether
@@ -227,7 +227,7 @@ impl CallerManager {
         } else {
             None
         };
-        let want_domestic = rng.gen::<f32>() < self.settings.same_country_probability;
+        let want_domestic = rng.random::<f32>() < self.settings.same_country_probability;
 
         // If the callsign pool can't supply a match (e.g. a domestic-only pool
         // while DX is wanted), fall back to the last drawn callsign.
@@ -260,17 +260,17 @@ impl CallerManager {
         self.serial_counter += 1;
 
         // Random parameters
-        let wpm = rng.gen_range(self.settings.wpm_min..=self.settings.wpm_max);
+        let wpm = rng.random_range(self.settings.wpm_min..=self.settings.wpm_max);
         let half_width = (self.settings.frequency_spread_hz / 2.0).max(0.0);
-        let freq_offset = rng.gen_range(-half_width..half_width);
-        let amplitude = rng.gen_range(self.settings.amplitude_min..self.settings.amplitude_max);
+        let freq_offset = rng.random_range(-half_width..half_width);
+        let amplitude = rng.random_range(self.settings.amplitude_min..self.settings.amplitude_max);
 
         // Random patience (1-7 attempts)
         let patience =
-            rng.gen_range(self.pileup_settings.min_patience..=self.pileup_settings.max_patience);
+            rng.random_range(self.pileup_settings.min_patience..=self.pileup_settings.max_patience);
 
         // Random reaction time (faster operators call sooner)
-        let reaction_delay_ms = rng.gen_range(100..800);
+        let reaction_delay_ms = rng.random_range(100..800);
 
         self.next_id += 1;
 
@@ -300,7 +300,7 @@ impl CallerManager {
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) -> Vec<StationParams> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // First, replenish the queue
         self.replenish_queue(contest, contest_settings, user_callsign, cty);
@@ -319,7 +319,7 @@ impl CallerManager {
         // Sort by reaction time with a stable random jitter (precomputed)
         let mut jitter: HashMap<StationId, u32> = HashMap::new();
         for caller in &self.queue {
-            jitter.insert(caller.params.id, rng.gen_range(0..100));
+            jitter.insert(caller.params.id, rng.random_range(0..100));
         }
         self.queue.sort_by_key(|c| {
             c.params.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0)
@@ -337,7 +337,7 @@ impl CallerManager {
 
             // Probability check - more persistent callers are more likely to call
             let call_probability = 0.5 + (caller.patience as f32 - 1.0) * 0.1;
-            if rng.gen::<f32>() > call_probability {
+            if rng.random::<f32>() > call_probability {
                 continue;
             }
 
@@ -393,7 +393,7 @@ impl CallerManager {
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) -> Vec<StationParams> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Replenish queue first
         self.replenish_queue(contest, contest_settings, user_callsign, cty);
@@ -413,7 +413,7 @@ impl CallerManager {
         // Sort by reaction time with a stable random jitter
         let mut jitter: HashMap<StationId, u32> = HashMap::new();
         for caller in &self.queue {
-            jitter.insert(caller.params.id, rng.gen_range(0..100));
+            jitter.insert(caller.params.id, rng.random_range(0..100));
         }
         self.queue.sort_by_key(|c| {
             c.params.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0)
@@ -432,7 +432,7 @@ impl CallerManager {
             // Geometric decay: base_probability * 0.5^slot
             let base_probability = 0.5 + (caller.patience as f32 - 1.0) * 0.1;
             let slot_probability = base_probability * decay_factor.powi(responding.len() as i32);
-            if rng.gen::<f32>() > slot_probability {
+            if rng.random::<f32>() > slot_probability {
                 continue;
             }
 

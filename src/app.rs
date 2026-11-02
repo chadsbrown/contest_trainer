@@ -628,10 +628,10 @@ impl ContestApp {
                 self.context.end_correction();
             } else {
                 // Incorrect callsign - check if caller will correct
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let settings = &self.settings.simulation.call_correction;
 
-                let should_correct = rng.gen::<f32>() < settings.correction_probability
+                let should_correct = rng.random::<f32>() < settings.correction_probability
                     && self.context.correction_attempts < settings.max_correction_attempts;
 
                 if should_correct {
@@ -969,7 +969,7 @@ impl ContestApp {
             self.context.expecting_callsign_repeat = false;
             self.context.allow_callsign_repeat_ack = false;
 
-            let message = if allow_ack && rand::thread_rng().gen::<bool>() {
+            let message = if allow_ack && rand::rng().random::<bool>() {
                 "R R".to_string()
             } else {
                 caller.params.callsign.clone()
@@ -991,9 +991,9 @@ impl ContestApp {
 
         // If we're in correction mode, send the correction
         if self.context.correction_in_progress {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             // Send callsign once (75%) or twice (25%) for emphasis
-            let message = if rng.gen::<f32>() < 0.75 {
+            let message = if rng.random::<f32>() < 0.75 {
                 caller.params.callsign.clone()
             } else {
                 format!("{} {}", caller.params.callsign, caller.params.callsign)
@@ -1057,8 +1057,8 @@ impl ContestApp {
                     };
                 } else {
                     // Caller didn't hear their callsign - resend it or send "?"
-                    let mut rng = rand::thread_rng();
-                    let message = if rng.gen::<bool>() {
+                    let mut rng = rand::rng();
+                    let message = if rng.random::<bool>() {
                         caller.params.callsign.clone()
                     } else {
                         "?".to_string()
@@ -1079,8 +1079,8 @@ impl ContestApp {
             }
             CallerResponse::RequestAgn => {
                 // Caller heard their call but not our exchange - request AGN
-                let mut rng = rand::thread_rng();
-                let agn_message = if rng.gen::<bool>() { "AGN" } else { "?" };
+                let mut rng = rand::rng();
+                let agn_message = if rng.random::<bool>() { "AGN" } else { "?" };
 
                 let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
                     id: caller.params.id,
@@ -1098,14 +1098,14 @@ impl ContestApp {
             }
             CallerResponse::SendExchange => {
                 // Caller heard everything - send their exchange
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
 
                 // Only allow random AGN before the caller has sent their exchange once
                 let allow_random_agn = !self.context.caller_exchange_sent_once;
                 if allow_random_agn
-                    && rng.gen::<f32>() < self.settings.simulation.agn_request_probability
+                    && rng.random::<f32>() < self.settings.simulation.agn_request_probability
                 {
-                    let agn_message = if rng.gen::<bool>() { "AGN" } else { "?" };
+                    let agn_message = if rng.random::<bool>() { "AGN" } else { "?" };
 
                     let _ = self.cmd_tx.send(AudioCommand::StartStation(StationParams {
                         id: caller.params.id,

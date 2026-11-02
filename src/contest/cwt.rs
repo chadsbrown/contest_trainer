@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use toml::value::Table;
 
 use super::types::{
@@ -140,9 +140,9 @@ impl CwtCallsignSource {
 
         let station = if available.is_empty() {
             self.used.clear();
-            self.stations.choose(&mut rand::thread_rng())?
+            self.stations.choose(&mut rand::rng())?
         } else {
-            *available.choose(&mut rand::thread_rng())?
+            *available.choose(&mut rand::rng())?
         };
 
         self.used.insert(station.callsign.clone());

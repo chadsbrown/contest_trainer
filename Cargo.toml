@@ -10,7 +10,7 @@ egui-file-dialog = "0.12"
 cpal = "0.15"
 crossbeam-channel = "0.5"
 dirs = "5"
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.9", features = ["small_rng"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 chrono = "0.4"

@@ -1,4 +1,4 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use rand::Rng;
 use std::collections::HashSet;
 use std::path::Path;
@@ -68,9 +68,9 @@ impl CallsignPool {
         // Fast path: while most of the pool is unused, pick random indices until
         // we hit an unused callsign (avoids scanning the whole list each call).
         if !self.callsigns.is_empty() && self.used.len() < self.callsigns.len() / 2 {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             for _ in 0..16 {
-                let call = &self.callsigns[rng.gen_range(0..self.callsigns.len())];
+                let call = &self.callsigns[rng.random_range(0..self.callsigns.len())];
                 if !self.used.contains(call) {
                     let call = call.clone();
                     self.used.insert(call.clone());
@@ -88,10 +88,10 @@ impl CallsignPool {
         if available.is_empty() {
             // Reset if all used
             self.used.clear();
-            return self.callsigns.choose(&mut rand::thread_rng()).cloned();
+            return self.callsigns.choose(&mut rand::rng()).cloned();
         }
 
-        let call = (*available.choose(&mut rand::thread_rng())?).clone();
+        let call = (*available.choose(&mut rand::rng())?).clone();
         self.used.insert(call.clone());
         Some(call)
     }

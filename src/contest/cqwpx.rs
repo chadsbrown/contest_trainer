@@ -97,7 +97,7 @@ fn parse_serial(value: &str) -> Option<u32> {
 }
 
 fn pick_rst() -> &'static str {
-    let roll = rand::thread_rng().gen_range(0..100);
+    let roll = rand::rng().random_range(0..100);
     if roll < 5 {
         "ENN"
     } else if roll < 15 {
@@ -220,7 +220,7 @@ impl Contest for CqWpxContest {
 
     fn generate_exchange(&self, _callsign: &str, _serial: u32, settings: &toml::Value) -> Exchange {
         let (min, max) = Self::serial_range(settings);
-        let serial = rand::thread_rng().gen_range(min..=max);
+        let serial = rand::rng().random_range(min..=max);
         Exchange::new(vec![pick_rst().to_string(), Self::format_serial(serial)])
     }
 
