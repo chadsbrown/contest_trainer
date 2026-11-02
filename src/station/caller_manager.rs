@@ -176,12 +176,12 @@ impl CallerManager {
         }
         self.last_replenish = Instant::now();
 
-        // Target queue size based on station probability (more likely = bigger pileup)
+        // Target queue size based on the maximum simultaneous stations
         let target_queue_size =
             (self.settings.max_simultaneous_stations as f32 * 2.5).ceil() as usize;
 
         // Count active callers (not given up, not worked)
-        let active_in_queue = self
+        let mut active_in_queue = self
             .queue
             .iter()
             .filter(|c| c.state != CallerState::GaveUp && c.state != CallerState::Worked)
@@ -197,6 +197,7 @@ impl CallerManager {
             if let Some(caller) = self.create_caller(contest, contest_settings, user_callsign, cty)
             {
                 self.queue.push(caller);
+                active_in_queue += 1;
             } else {
                 break;
             }
@@ -450,6 +451,98 @@ impl CallerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Keep regression tests bounded even if replenishment stops honoring its target.
+    struct FiniteCallsignSource {
+        remaining: usize,
+    }
+
+    impl CallsignSource for FiniteCallsignSource {
+        fn random(
+            &mut self,
+            _contest: &dyn Contest,
+            _serial: u32,
+            _settings: &toml::Value,
+        ) -> Option<(String, crate::contest::Exchange)> {
+            if self.remaining == 0 {
+                return None;
+            }
+            self.remaining -= 1;
+            Some((
+                format!("W{}AW", self.remaining),
+                crate::contest::Exchange::new(vec![]),
+            ))
+        }
+    }
+
+    #[test]
+    fn replenish_queue_stops_at_target_at_full_probability() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+
+        for (max_stations, target) in [(1, 3), (2, 5), (5, 13)] {
+            let mut manager = CallerManager::new(
+                Box::new(FiniteCallsignSource {
+                    remaining: target + 1,
+                }),
+                SimulationSettings {
+                    max_simultaneous_stations: max_stations,
+                    station_probability: 1.0,
+                    ..SimulationSettings::default()
+                },
+            );
+            manager.last_replenish = Instant::now() - Duration::from_millis(500);
+
+            manager.replenish_queue(contest.as_ref(), &contest_settings, None, None);
+
+            assert_eq!(manager.queue.len(), target, "max_stations={max_stations}");
+        }
+    }
+
+    #[test]
+    fn replenish_queue_counts_existing_callers_and_replaces_finished_callers() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+        let mut manager = CallerManager::new(
+            Box::new(FiniteCallsignSource { remaining: 10 }),
+            SimulationSettings {
+                max_simultaneous_stations: 2,
+                station_probability: 1.0,
+                ..SimulationSettings::default()
+            },
+        );
+        for state in [
+            CallerState::Waiting,
+            CallerState::Calling,
+            CallerState::Worked,
+            CallerState::GaveUp,
+        ] {
+            let mut caller = manager
+                .create_caller(contest.as_ref(), &contest_settings, None, None)
+                .unwrap();
+            caller.state = state;
+            manager.queue.push(caller);
+        }
+
+        manager.last_replenish = Instant::now() - Duration::from_millis(500);
+        manager.replenish_queue(contest.as_ref(), &contest_settings, None, None);
+
+        // Two existing viable callers plus three new ones, and two finished callers.
+        assert_eq!(manager.queue.len(), 7);
+        assert_eq!(
+            manager
+                .queue
+                .iter()
+                .filter(|c| c.state == CallerState::Waiting || c.state == CallerState::Calling)
+                .count(),
+            5
+        );
+
+        // A full queue must stay unchanged on the next eligible refill.
+        manager.last_replenish = Instant::now() - Duration::from_millis(500);
+        manager.replenish_queue(contest.as_ref(), &contest_settings, None, None);
+        assert_eq!(manager.queue.len(), 7);
+    }
 
     #[test]
     fn test_caller_response_from_progress() {
