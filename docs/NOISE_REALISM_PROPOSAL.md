@@ -127,13 +127,13 @@ No settings fields were added and saved values are retained.
 
 ### 4.2 Phase 1 follow-ups
 
-Found in review on 2026-11-02 and fixed in the follow-up commit.
+Found in review on 2026-11-02 and fixed in `089fea8`.
 
 | Item | Change | Regression test |
 |---|---|---|
-| 20 Hz test margin | Background-only renders measure about −19.3 to −19.7 dB at 20 Hz: that is the 2nd-order filter's own skirt, so the old fixed 20 dB threshold passed only because the test used the heavy-effects render. The check now compares the heavy-effects render against a background-only render through the same filter and fails if effects add more than 3 dB of low-frequency energy. (The old QRN path put 20 Hz about 24 dB *above* that reference.) | `all_noise_effects_are_band_limited_at_supported_sample_rates` |
+| 20 Hz test margin | Background-only renders measure about −19.3 to −19.7 dB at 20 Hz relative to 600 Hz: the 2nd-order filter's skirt acting on pink-tilted excitation. The old fixed 20 dB threshold passed only because the test used the heavy-effects render. The check now compares the heavy-effects render against a background-only render through the same filter and fails if effects add more than 3 dB of low-frequency energy. (In the §3.2 baseline, QRN raised 20 Hz by about 17 dB relative to band noise alone.) | `all_noise_effects_are_band_limited_at_supported_sample_rates` |
 | 5 kHz threshold | The original proposal said "at least 15 dB" but the code asserted `center / 30` (14.8 dB). Thresholds are now written in dB; the check is a true 15 dB. | same |
-| Sample-rate normalization | White excitation (background, QRN, crash bursts) is scaled by `sqrt(fs / 44100)` so noise power per Hz is constant. `PinkNoise` adapts its poles and gains to the device rate, keeping each stage's corner frequency and DC gain. Output at 44.1 kHz is bit-identical to `9467a9b`. | `background_level_is_independent_of_sample_rate`, `crash_level_is_independent_of_sample_rate`, `pink_noise_response_is_independent_of_sample_rate` |
+| Sample-rate normalization | White excitation (background, QRN, crash bursts) is scaled by `sqrt(fs / 44100)` so noise power per Hz is constant. `PinkNoise` adapts its poles and gains to the device rate, keeping each stage's corner frequency and DC gain. Output at 44.1 kHz is bit-identical to `9467a9b` (verified by hashing 10 s of seeded samples with default effects). | `background_level_is_independent_of_sample_rate`, `crash_level_is_independent_of_sample_rate`, `pink_noise_response_is_independent_of_sample_rate` |
 
 The size of the sample-rate error was smaller than first estimated for the background. The fixed pink coefficients made their 1/f components *louder* at higher rates, roughly cancelling the 1/fs loss of the white term. Measured background error before the fix was +0.06 dB at 48 kHz and +0.35 dB at 96 kHz. Pure-white sources had the full 1/fs dependence: crash-dominated renders were −0.24 dB at 48 kHz and −1.37 dB at 96 kHz. After the fix all of these are within ±0.11 dB. The pink-stage response matches the 44.1 kHz design within 0.1 dB up to 1.5 kHz, the highest passband edge the UI allows (it is about −0.1 dB at 3 kHz at 96 kHz).
 
