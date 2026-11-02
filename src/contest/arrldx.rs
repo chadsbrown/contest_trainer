@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use rand::Rng;
 use toml::value::Table;
 
@@ -127,9 +127,9 @@ impl ArrlDxCallsignSource {
 
         let station = if available.is_empty() {
             self.used.clear();
-            self.stations.choose(&mut rand::thread_rng())?
+            self.stations.choose(&mut rand::rng())?
         } else {
-            *available.choose(&mut rand::thread_rng())?
+            *available.choose(&mut rand::rng())?
         };
 
         self.used.insert(station.callsign.clone());
@@ -183,7 +183,7 @@ fn normalize_rst(value: &str) -> String {
 }
 
 fn pick_rst() -> &'static str {
-    let roll = rand::thread_rng().gen_range(0..100);
+    let roll = rand::rng().random_range(0..100);
     if roll < 5 {
         "ENN"
     } else if roll < 15 {
@@ -199,7 +199,7 @@ fn maybe_t_substitute_power(exchange: &str) -> String {
         return trimmed.to_string();
     }
 
-    let roll = rand::thread_rng().gen_range(0..100);
+    let roll = rand::rng().random_range(0..100);
     if roll < 80 {
         trimmed
             .chars()

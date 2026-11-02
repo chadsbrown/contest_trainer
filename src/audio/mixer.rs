@@ -19,7 +19,7 @@ pub struct QsbOscillator {
 
 impl QsbOscillator {
     pub fn new(sample_rate: u32, settings: &QsbSettings) -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // Convert cycles per minute to radians per sample
         // base_rate is cycles/minute, we need radians/sample
@@ -30,16 +30,16 @@ impl QsbOscillator {
         // Create three oscillators with different rates for natural variation
         // Rates are roughly 1x, 0.7x, and 1.3x the base rate, with some randomness
         let velocities = [
-            base_angular_velocity * (0.9 + rng.gen::<f32>() * 0.2),
-            base_angular_velocity * (0.6 + rng.gen::<f32>() * 0.2),
-            base_angular_velocity * (1.2 + rng.gen::<f32>() * 0.2),
+            base_angular_velocity * (0.9 + rng.random::<f32>() * 0.2),
+            base_angular_velocity * (0.6 + rng.random::<f32>() * 0.2),
+            base_angular_velocity * (1.2 + rng.random::<f32>() * 0.2),
         ];
 
         // Random starting phases so each station sounds different
         let phases = [
-            rng.gen::<f32>() * 2.0 * std::f32::consts::PI,
-            rng.gen::<f32>() * 2.0 * std::f32::consts::PI,
-            rng.gen::<f32>() * 2.0 * std::f32::consts::PI,
+            rng.random::<f32>() * 2.0 * std::f32::consts::PI,
+            rng.random::<f32>() * 2.0 * std::f32::consts::PI,
+            rng.random::<f32>() * 2.0 * std::f32::consts::PI,
         ];
 
         Self {
@@ -438,11 +438,11 @@ impl Mixer {
         }
 
         // Apply master volume, dither, and soft clipping
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for sample in buffer.iter_mut() {
             *sample *= self.settings.master_volume;
             // Add very small triangular dither to prevent audio artifacts
-            let dither = (rng.gen::<f32>() - 0.5) * 0.001;
+            let dither = (rng.random::<f32>() - 0.5) * 0.001;
             *sample += dither;
             // Soft clipping using tanh
             if sample.abs() > 0.8 {

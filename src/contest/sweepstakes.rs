@@ -1,4 +1,4 @@
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use rand::Rng;
 use std::collections::HashSet;
 use std::path::Path;
@@ -206,9 +206,9 @@ impl SweepstakesCallsignSource {
 
         let station = if available.is_empty() {
             self.used.clear();
-            self.stations.choose(&mut rand::thread_rng())?
+            self.stations.choose(&mut rand::rng())?
         } else {
-            *available.choose(&mut rand::thread_rng())?
+            *available.choose(&mut rand::rng())?
         };
 
         self.used.insert(station.callsign.clone());
@@ -225,8 +225,8 @@ impl super::types::CallsignSource for SweepstakesCallsignSource {
     ) -> Option<(String, Exchange)> {
         let station = self.random_station()?;
         let (min, max) = SweepstakesContest::serial_range(settings);
-        let serial = rand::thread_rng().gen_range(min..=max);
-        let precedence = *PRECEDENCES.choose(&mut rand::thread_rng()).unwrap_or(&'A');
+        let serial = rand::rng().random_range(min..=max);
+        let precedence = *PRECEDENCES.choose(&mut rand::rng()).unwrap_or(&'A');
         let check = station.check.parse::<u16>().ok()?;
 
         Some((
@@ -385,13 +385,13 @@ impl Contest for SweepstakesContest {
     }
 
     fn generate_exchange(&self, callsign: &str, _serial: u32, settings: &toml::Value) -> Exchange {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let precedence = *PRECEDENCES
-            .get(rng.gen_range(0..PRECEDENCES.len()))
+            .get(rng.random_range(0..PRECEDENCES.len()))
             .unwrap_or(&'A');
         let (min, max) = Self::serial_range(settings);
-        let serial = rng.gen_range(min..=max);
-        let check = rng.gen_range(60..=99) as u16;
+        let serial = rng.random_range(min..=max);
+        let check = rng.random_range(60..=99) as u16;
         let section = Self::section_for_callsign(callsign);
 
         Exchange::new(vec![

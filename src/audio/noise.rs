@@ -143,7 +143,7 @@ impl NoiseGenerator {
             1.0 - (-2.0 * std::f32::consts::PI * cutoff_hz / sample_rate as f32).exp();
 
         Self {
-            rng: SmallRng::from_entropy(),
+            rng: SmallRng::from_os_rng(),
             sample_rate,
             filter,
             pink: PinkNoise::new(),
@@ -170,12 +170,12 @@ impl NoiseGenerator {
         if self.crash_remaining_samples == 0 && crash_rate > 0.0 {
             // Probability per sample
             let prob_per_sample = crash_rate / self.sample_rate as f32;
-            if self.rng.gen::<f32>() < prob_per_sample {
+            if self.rng.random::<f32>() < prob_per_sample {
                 // Start a crash - duration 50-200ms
-                let duration_ms = self.rng.gen_range(50.0..200.0);
+                let duration_ms = self.rng.random_range(50.0..200.0);
                 self.crash_remaining_samples =
                     (duration_ms * self.sample_rate as f32 / 1000.0) as u32;
-                self.crash_amplitude = crash_intensity * self.rng.gen_range(0.5..1.0);
+                self.crash_amplitude = crash_intensity * self.rng.random_range(0.5..1.0);
                 // Decay rate so amplitude reaches ~10% at end
                 self.crash_decay = (0.1_f32).powf(1.0 / self.crash_remaining_samples as f32);
             }
@@ -186,14 +186,14 @@ impl NoiseGenerator {
     fn maybe_start_pop(&mut self, pop_rate: f32, pop_intensity: f32) {
         if self.pop_remaining_samples == 0 && pop_rate > 0.0 {
             let prob_per_sample = pop_rate / self.sample_rate as f32;
-            if self.rng.gen::<f32>() < prob_per_sample {
+            if self.rng.random::<f32>() < prob_per_sample {
                 // Start a pop - very short, 1-5ms
-                let duration_ms = self.rng.gen_range(1.0..5.0);
+                let duration_ms = self.rng.random_range(1.0..5.0);
                 self.pop_remaining_samples =
                     (duration_ms * self.sample_rate as f32 / 1000.0) as u32;
-                self.pop_amplitude = pop_intensity * self.rng.gen_range(0.6..1.0);
+                self.pop_amplitude = pop_intensity * self.rng.random_range(0.6..1.0);
                 // Random polarity
-                if self.rng.gen::<bool>() {
+                if self.rng.random::<bool>() {
                     self.pop_amplitude = -self.pop_amplitude;
                 }
             }
@@ -204,7 +204,7 @@ impl NoiseGenerator {
     fn crash_sample(&mut self) -> f32 {
         if self.crash_remaining_samples > 0 {
             self.crash_remaining_samples -= 1;
-            let noise: f32 = self.rng.gen_range(-1.0..1.0);
+            let noise: f32 = self.rng.random_range(-1.0..1.0);
             let sample = noise * self.crash_amplitude;
             self.crash_amplitude *= self.crash_decay;
             sample
@@ -249,7 +249,7 @@ impl NoiseGenerator {
         let osc2 = (self.qrn_phase * 1.7).sin();
         let mod_depth = 0.5 + 0.5 * self.qrn_mod_phase.sin();
 
-        let noise: f32 = self.rng.gen_range(-0.3..0.3);
+        let noise: f32 = self.rng.random_range(-0.3..0.3);
 
         qrn_intensity * mod_depth * (osc1 * 0.6 + osc2 * 0.3 + noise)
     }
@@ -261,7 +261,7 @@ impl NoiseGenerator {
         self.maybe_start_pop(settings.pop_rate, settings.pop_intensity);
 
         // Generate white noise base and color it to pink (closer to HF band noise)
-        let white: f32 = self.rng.gen_range(-1.0..1.0);
+        let white: f32 = self.rng.random_range(-1.0..1.0);
         let pink = self.pink.next(white);
 
         // Generate impulsive components and run them through the same bandpass
@@ -272,7 +272,7 @@ impl NoiseGenerator {
         let filtered = self.filter.process(pink + crash + pop);
 
         // Slow noise-floor modulation to mimic AGC/band fading
-        let target = self.rng.gen_range(-1.0..1.0);
+        let target = self.rng.random_range(-1.0..1.0);
         self.noise_floor += self.noise_floor_alpha * (target - self.noise_floor);
         let floor_mod = 1.0 + settings.qrn_intensity * 0.4 * self.noise_floor;
 
