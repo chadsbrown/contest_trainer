@@ -18,8 +18,10 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 2. **Unzip** the archive. It contains a `contest_trainer/` folder with the binary and all callsign files (`callsigns.txt`, `cwt_callsigns.txt`, `arrldx_callsigns.txt`, `ss_callsigns.txt`).
 
 3. **Run the application** from inside the `contest_trainer/` folder.
-4. **Personalize settings** (File->Settings) to configure your callsign, name and exchange info.
-5. **Start running** by pressing F1/Enter to send your first CQ.
+4. **Personalize settings** (File->Settings): set your callsign under User Settings, then pick a contest and fill in your exchange for it under Active Contest.
+5. **Start running** by pressing F1/Enter to send your first CQ. If nobody answers, call again.
+
+For a walkthrough of every setting and the operating flow, see the [User Guide](docs/user-guide.md).
 
 ## Features
 
@@ -30,14 +32,16 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
   - CQ WPX
   - ARRL Sweepstakes
   - ARRL DX CW
-- **Persistent Caller Queue**: Callers stay on frequency across CQ cycles, retry after randomized delays based on “patience,” and eventually give up if not worked (with occasional tail-enders)
-- **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
+- **Persistent Caller Queue**: Stations find your frequency over time, stay across CQ cycles, retry based on “patience,” and eventually give up if not worked. On a quiet band some CQs go unanswered
+- **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations, with optional QSB (fading)
 - **Multiple Simultaneous Callers**: User-configurable number of callers
-- **Background Noise**: Adjustable noise level to simulate real band conditions
+- **Background Noise**: Adjustable noise level, receiver bandwidth, static crashes and pops to simulate real band conditions
+- **Call Correction**: If you send a busted callsign, the station will usually correct you before giving its exchange (and sometimes won't, leaving you with a busted call)
+- **Callers Asking for Repeats**: Callers occasionally ask you to send your exchange again
 - **Tail-Ender Support**: After your TU, stations that lost out in the pileup call again and new ones may tail-end, without waiting for your next CQ (or not)
 - **Partial Call Queries**: Use F5 to query a partial callsign when you can't copy the full call
 - **Score Tracking**: Track QSOs, points, and hourly rate
-- **Session Statistics**: Detailed performance analysis including accuracy rates, WPM statistics, and character-level error tracking
+- **Session Statistics**: Detailed performance analysis including accuracy rates, streaks, WPM statistics, and character-level error tracking, exportable to a Markdown file
 - **Persistent Settings**: Your configuration is saved between sessions
 
 ## Downloads
@@ -49,17 +53,17 @@ Pre-built binaries for Windows, macOS (Intel and Apple Silicon), and Linux are a
 | Key | Function |
 |-----|----------|
 | F1 | Send CQ |
-| F2 | Send Exchange |
+| F2 | Send your exchange only |
 | F3 | Send TU (thank you) |
-| F5 | Query partial callsign (His Call) |
-| F8 | Request repeat (?) |
+| F5 | Send his call only (contents of the callsign field) - use it to query a partial callsign |
+| F8 | Request repeat (?). The station repeats its exchange once it has sent it, its callsign before that |
 | F12 | Wipe (clear callsign and exchange fields) |
-| Enter | Submit current field / Send CQ if empty |
-| Tab | Switch between callsign and exchange fields |
-| Space | Move between exchange fields |
-| Up Arrow | Increase your WPM |
-| Down Arrow | Decrease your WPM |
-| Esc | Stop sending |
+| Enter | Callsign field: send his call + your exchange (or CQ if the field is empty). Exchange field: log the QSO and send TU |
+| Tab / Shift+Tab | Move to the next / previous field |
+| Space / Shift+Space | Move to the next / previous field |
+| Up Arrow | Increase your WPM (max 50) |
+| Down Arrow | Decrease your WPM (min 15) |
+| Esc | Stop your transmission. Stations keep sending, and you can carry on with Enter, F2, F5 or F8 |
 
 ## UI Controls
 
@@ -67,7 +71,7 @@ The main window includes several buttons at the bottom:
 
 - **Reset Stats**: Clear all QSO statistics and start fresh
 - **Toggle Static**: Enable/disable background noise
-- **Session Stats**: Open a detailed statistics window showing accuracy, WPM analysis, character error rates, and recent QSOs
+- **Session Stats**: Open a detailed statistics window showing accuracy, streaks, F5/F8 usage, WPM analysis, character error rates, and recent QSOs. Its **Export Stats** button writes the session to a Markdown file (`CWCT-<callsign>-<date>-<time>.md`) in the Stats Export Directory, or the current directory if none is set
 
 ## Settings
 
@@ -76,19 +80,30 @@ Access settings via File > Settings. The settings window opens as a separate win
 ### User Settings
 
 - **Your Callsign**: Your amateur radio callsign
-- **Your Name**: Your name (used in some contest exchanges)
-- **CQ Zone**: Your CQ zone number
-- **Section**: Your ARRL section
-- **Your WPM**: Speed for your transmitted CW
+- **Your WPM**: Speed for your transmitted CW (15-50)
 - **Font Size**: UI font size
 - **AGN Message**: Message sent when requesting a repeat (default: "?")
+- **Show Status Line**: Show or hide the status line that says what is happening and what to do next
+- **Show Main Field Hints**: Show placeholder hints in the callsign and exchange fields
+- **Stats Export Directory**: Where exported session statistics are written
 
 ### Contest Settings
 
 - **Contest Type**: Select from CWT, CQ World Wide, CQ WPX, ARRL Sweepstakes, or ARRL DX CW
-- **CQ Message**: Your CQ message (default: "CQ TEST")
-- **Callsign File**: Per-contest callsign file used by the selected contest (if applicable)
-- **Serial Range (CQ WPX)**: Minimum/maximum serial number used by callers (1-12000, default 1000-2500)
+
+### Active Contest
+
+Settings for the selected contest. Each contest keeps its own.
+
+- **CQ Message**: Your CQ message (default: "CQ TEST"); your callsign is appended
+- **Callsign File**: Callsign file used by the selected contest. Callers come from this file, and a small built-in list is used if it cannot be read
+- **Serial Min / Serial Max (CQ WPX, Sweepstakes)**: Range of serial numbers sent by callers (1-12000; default 1000-2500 for CQ WPX, 100-400 for Sweepstakes)
+- **Your Exchange**: What you send, which depends on the contest:
+  - CWT: Your Name, Your Number
+  - CQ World Wide: Your Zone
+  - CQ WPX: nothing to set (5NN plus a serial number that counts up from 001)
+  - ARRL Sweepstakes: Your Precedence, Your Check, Your Section (plus a serial number that counts up)
+  - ARRL DX CW: Your Exchange (state/province, or power if you are DX)
 
 ### Simulation Settings
 
@@ -97,7 +112,6 @@ Access settings via File > Settings. The settings window opens as a separate win
 - **WPM Range**: Speed range for calling stations
 - **Filter Width**: Total spread between calling stations (Hz). Offsets are ± half the width. Default 300 Hz (min 100, max 500).
 - **Signal Strength Range**: Volume variation between stations
-- **Mute RX during TX (callers + noise)**: Realism (probably for most people this is more realistic.  yes, there are exceptions.)
 - **Caller Needs Repeat Probability**: Chance that a caller will send "AGN" or "?" requesting you repeat your exchange
 - **Filter Callers by Country**: Enable/disable country-based caller filtering. When enabled, controls the mix of domestic vs DX callers
 - **Same Country Probability**: (Only shown when filter is enabled) Controls how often callers are from your same DXCC country (0.0-1.0). Lower values mean more DX callers, higher values mean more domestic callers. Default is 0.1 (10% domestic). Uses cty.dat for country lookups based on callsign prefixes.
@@ -106,7 +120,9 @@ Access settings via File > Settings. The settings window opens as a separate win
 
 - **Tone Frequency**: Base pitch for CW tones (Hz)
 - **Noise Level**: Background noise intensity
+- **Noise Bandwidth**: Width of the receiver filter applied to the noise (100-1000 Hz)
 - **Master Volume**: Overall audio volume
+- **Mute RX during TX (callers + noise)**: Realism (probably for most people this is more realistic.  yes, there are exceptions.)
 - **Mute sidetone during TX**: Mute your own transmitted audio while sending
 - **Static/QRN Settings**: Control static crashes, pops/clicks, and atmospheric noise
 - **Enable QSB**: Simulate realistic signal fading on caller signals
@@ -191,6 +207,13 @@ On Linux, you may need to install audio and GUI dependencies:
 sudo apt-get install libasound2-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
 ```
 
+## Documentation
+
+- [User Guide](docs/user-guide.md): settings and operating flow in detail
+- [State Machine](docs/STATE_MACHINE.md): how the QSO flow works internally
+- [Adding Contests](docs/ADDING_CONTESTS.md): how to add a new contest
+- [Specification](SPECIFICATION.md): full behavior reference
+
 ## Configuration Location
 
 Settings are stored in:
@@ -209,7 +232,8 @@ Special thanks to the following people, who contributed feedback/ideas to the de
 - KD9UYC
 - DJ5CW
 - N9TTK
-- 
+- N0RC
+
 This application was created collaboratively with [Claude](https://www.anthropic.com/claude) and [Codex](https://openai.com/codex).
 
 ## About
@@ -218,7 +242,7 @@ I created this for myself (N9UNX), but perhaps you might enjoy using it also.  T
 
 ## Roadmap
 
-- Perhaps add more contests, if people want them (I imagine the will).  Honestly, I could live with just the CWT as the exchange is great practice (w/o a history file, as it is here, and in my opinion how it should be for a practice tool like this).
+- Perhaps add more contests, if people want them (I imagine they will).  Honestly, I could live with just the CWT as the exchange is great practice (w/o a history file, as it is here, and in my opinion how it should be for a practice tool like this).
 - Perhaps think about what 2BSIQ would be like, and how it should operate. (presently testing, but more work needed)
 - Feedback welcome.
 
