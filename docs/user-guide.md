@@ -24,7 +24,7 @@ A Morse code contest simulator for practicing CW contest operating skills.
 | Enter | Submit current field (or send CQ when callsign is empty) |
 | Tab | Move to next field (Shift+Tab moves backward) |
 | Space | Move to next field (Shift+Space moves backward) |
-| Esc | Stop transmission audio |
+| Esc | Stop your transmission |
 
 Notes:
 - If you press **F5** after copying the callsign correctly, the station may acknowledge with **"R R"** instead of repeating the full callsign.

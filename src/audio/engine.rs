@@ -84,7 +84,8 @@ impl AudioEngine {
                 let mut mono_buffer = vec![0.0f32; num_frames];
 
                 // Fill the mono buffer
-                let (completed_stations, user_completed, completed_segments) = {
+                // Nothing waits on a station finishing, so those are not reported
+                let (_completed_stations, user_completed, completed_segments) = {
                     let mut mixer = mixer.lock().unwrap();
                     mixer.fill_buffer(&mut mono_buffer)
                 };
@@ -99,15 +100,12 @@ impl AudioEngine {
                 }
 
                 // Send completion events
-                for station_id in completed_stations {
-                    let _ = event_tx.try_send(AudioEvent::StationComplete(station_id));
-                }
                 // Send segment completion events before user message complete
-                for segment_type in completed_segments {
-                    let _ = event_tx.try_send(AudioEvent::UserSegmentComplete(segment_type));
+                for (id, segment_type) in completed_segments {
+                    let _ = event_tx.try_send(AudioEvent::UserSegmentComplete(id, segment_type));
                 }
-                if user_completed {
-                    let _ = event_tx.try_send(AudioEvent::UserMessageComplete);
+                if let Some(id) = user_completed {
+                    let _ = event_tx.try_send(AudioEvent::UserMessageComplete(id));
                 }
             },
             |err| {
@@ -131,14 +129,17 @@ impl AudioEngine {
                             let message = params.callsign.clone();
                             mixer.add_station(&params, &message);
                         }
-                        AudioCommand::PlayUserMessageSegmented { segments, wpm } => {
-                            mixer.play_user_message_segmented(&segments, wpm);
+                        AudioCommand::PlayUserMessageSegmented { id, segments, wpm } => {
+                            mixer.play_user_message_segmented(id, &segments, wpm);
                         }
                         AudioCommand::UpdateSettings(settings) => {
                             mixer.update_settings(settings);
                         }
                         AudioCommand::StopAll => {
                             mixer.clear_all();
+                        }
+                        AudioCommand::StopUser => {
+                            mixer.stop_user();
                         }
                     }
                 }

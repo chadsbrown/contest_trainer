@@ -137,14 +137,9 @@ StationTxType
 QsoProgress
   sent_their_call: bool           -- We finished sending caller's callsign
   sent_our_exchange: bool         -- We finished sending our exchange
-  received_their_call: bool       -- User entered a callsign
-  received_their_exchange: bool   -- User entered an exchange
 ```
 
-Updated by:
-- `sent_their_call` / `sent_our_exchange`: Set by audio segment completion events.
-- `received_their_call`: Set when user submits callsign (Enter in callsign field).
-- `received_their_exchange`: Set when user submits exchange (Enter in exchange field).
+Updated by audio segment completion events for the message currently on the air.
 
 ### 4.5 QSO Context
 
@@ -156,11 +151,17 @@ QsoContext
   correction_in_progress: bool             -- Station is correcting our copy
   correction_attempts: u8                  -- How many correction attempts
   wait_until: Option<Instant>              -- Timer for response delays
-  expecting_callsign_repeat: bool          -- Caller should repeat their call
-  allow_callsign_repeat_ack: bool          -- Caller may send "R R" instead
+  callsign_repeat_request: Option<CallsignRepeat>
+                                           -- Pending F5/F8 request for the caller to
+                                              repeat their call: Required, or
+                                              MayAcknowledge ("R R" allowed instead)
   caller_exchange_sent_once: bool          -- Caller has sent exchange at least once
-  awaiting_user_exchange: bool             -- Waiting for user to send exchange
 ```
+
+`callsign_repeat_request` is one-shot: the next station response takes it, whoever gives it
+(the selected caller, or the whole pileup when nobody is selected).
+
+The context is reset when a QSO is logged, when a TU ends with no tail-ender, and on CQ.
 
 ### 4.6 State Transitions
 
@@ -189,21 +190,27 @@ WaitingForTailEnder -[100ms]-> StationsCalling
 | StationsCalling | F5 | UserTransmitting{CallsignOnly} |
 | StationsCalling | F2 | UserTransmitting{ExchangeOnly} |
 | StationsCalling | F8 | UserTransmitting{Agn} |
+| StationTransmitting{Correction/RequestingAgn} | Enter (with callsign), F2, F5, F8 | As for StationsCalling |
+| StationTransmitting{SendingExchange} | F8 | UserTransmitting{Agn} (exchange repeat) |
 | UserTransmitting{Exchange/CallsignOnly/ExchangeOnly/Agn} | Message complete | WaitingForStation (250ms) |
 | UserTransmitting{Tu} | Message complete | Try tail-ender -> Idle or WaitingForTailEnder |
 | WaitingForStation | Wait elapsed, CallerResponse::Confused | StationsCalling |
 | WaitingForStation | Wait elapsed, CallerResponse::RequestAgn | StationTransmitting{RequestingAgn} |
 | WaitingForStation | Wait elapsed, CallerResponse::SendExchange | StationTransmitting{SendingExchange} |
 | WaitingForStation | Wait elapsed, correction_in_progress | StationTransmitting{Correction} |
-| WaitingForStation | Wait elapsed, expecting_callsign_repeat | StationsCalling |
-| WaitingForStation | Wait elapsed, CallerResponse::Wait | StationsCalling |
+| WaitingForStation | Wait elapsed, callsign_repeat_request pending | StationsCalling |
 | StationTransmitting{SendingExchange} | Enter (exchange field) | QsoComplete |
-| StationTransmitting{RequestingAgn} | Station complete | StationsCalling |
-| StationTransmitting{Correction} | Station complete | StationsCalling |
 | QsoComplete | User message complete | Try tail-ender -> Idle or WaitingForTailEnder |
 | WaitingForTailEnder | 100ms elapsed | StationsCalling |
 | Any state | F1 | CallingCq (resets everything) |
-| Any state | Escape | Stop audio only (state unchanged) |
+| CallingCq | Escape | Idle |
+| UserTransmitting{Exchange/CallsignOnly/ExchangeOnly/Agn} | Escape | StationsCalling (Idle if no callers) |
+| UserTransmitting{Tu} / QsoComplete | Escape | Idle (no tail-ender) |
+| Any other state | Escape | Unchanged |
+
+`StationTransmitting` states do not end when the station's audio ends: they describe whose turn
+it was, and last until the user acts. Escape stops only the user's transmission; stations keep
+sending.
 
 ### 4.7 Caller Response Logic
 
@@ -216,11 +223,9 @@ Determines how a caller responds based on QSO progress:
 | false | true | Confused |
 | true | true | SendExchange |
 
-**Context override:** If `awaiting_user_exchange == true` AND `sent_their_call == true` AND `sent_our_exchange == false`, returns `Wait` (caller stays silent).
-
 **Special response behaviors in handle_station_response:**
 
-- **Expecting callsign repeat**: 50% chance of "R R" (only if `allow_callsign_repeat_ack`), otherwise sends callsign.
+- **Callsign repeat requested**: 50% chance of "R R" (only for `MayAcknowledge`), otherwise sends callsign. Checked first.
 - **Correction in progress**: 75% sends callsign once, 25% sends it twice (`"{call} {call}"`).
 - **Random AGN request**: On `SendExchange`, if `caller_exchange_sent_once == false`, probability `agn_request_probability` (default 10%) that caller sends AGN instead of exchange.
 
@@ -285,14 +290,14 @@ Used to match user input to the most likely caller in the pileup:
 | F2 | Send exchange only | Active callers exist |
 | F3 | Send TU | Always |
 | F5 | Send his call (callsign field contents) | Active callers exist, non-empty callsign |
-| F8 | Request repeat (AGN) | Context-dependent (callsign or exchange) |
+| F8 | Request repeat (AGN) | Exchange repeat once the station has sent its exchange, callsign repeat before that |
 | F12 | Wipe (clear all input fields) | Always |
 | Enter | Submit current field / Send CQ if callsign empty | Depends on field |
 | Tab / Shift+Tab | Navigate fields forward / backward | Always |
 | Space / Shift+Space | Navigate fields forward / backward | Always |
 | Up Arrow | Increase WPM by 1 | WPM < 50 |
 | Down Arrow | Decrease WPM by 1 | WPM > 15 |
-| Escape | Stop all audio transmission | Always |
+| Escape | Stop the user's transmission | Always |
 
 ### WPM Limits
 - Minimum: 15 WPM
@@ -324,17 +329,21 @@ Used to match user input to the most likely caller in the pileup:
 | Command | Payload |
 |---------|---------|
 | StartStation | StationParams (id, callsign, exchange, freq_offset, wpm, amplitude) |
-| PlayUserMessageSegmented | segments: Vec<MessageSegment>, wpm: u8 |
+| PlayUserMessageSegmented | id: MessageId, segments: Vec<MessageSegment>, wpm: u8 |
 | UpdateSettings | AudioSettings |
 | StopAll | (stops all audio except noise) |
+| StopUser | (stops the user's transmission only) |
 
 ### 6.3 Audio Events
 
 | Event | Payload |
 |-------|---------|
-| StationComplete | StationId |
-| UserMessageComplete | (none) |
-| UserSegmentComplete | MessageSegmentType |
+| UserMessageComplete | MessageId |
+| UserSegmentComplete | MessageId, MessageSegmentType |
+
+Events carry the id of the message they belong to. The app ignores events for any message other
+than the one currently on the air, so a stopped or replaced message cannot advance the state. A
+stopped message emits no completion event.
 
 ### 6.4 Message Segments
 
