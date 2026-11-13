@@ -51,6 +51,15 @@ impl CallerResponse {
     }
 }
 
+/// Return the pair in ascending order
+fn ordered<T: PartialOrd>(a: T, b: T) -> (T, T) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
 /// State of a caller in the persistent queue
 #[derive(Clone, Debug, PartialEq)]
 pub enum CallerState {
@@ -261,14 +270,21 @@ impl CallerManager {
         self.serial_counter += 1;
 
         // Random parameters
-        let wpm = rng.random_range(self.settings.wpm_min..=self.settings.wpm_max);
+        // Ranges come from user-editable settings, so tolerate min == max and
+        // min > max instead of panicking on an empty range.
+        let (wpm_lo, wpm_hi) = ordered(self.settings.wpm_min, self.settings.wpm_max);
+        let wpm = rng.random_range(wpm_lo..=wpm_hi);
         let half_width = (self.settings.frequency_spread_hz / 2.0).max(0.0);
-        let freq_offset = rng.random_range(-half_width..half_width);
-        let amplitude = rng.random_range(self.settings.amplitude_min..self.settings.amplitude_max);
+        let freq_offset = rng.random_range(-half_width..=half_width);
+        let (amp_lo, amp_hi) = ordered(self.settings.amplitude_min, self.settings.amplitude_max);
+        let amplitude = rng.random_range(amp_lo..=amp_hi);
 
         // Random patience (1-7 attempts)
-        let patience =
-            rng.random_range(self.pileup_settings.min_patience..=self.pileup_settings.max_patience);
+        let (patience_lo, patience_hi) = ordered(
+            self.pileup_settings.min_patience,
+            self.pileup_settings.max_patience,
+        );
+        let patience = rng.random_range(patience_lo..=patience_hi);
 
         // Random reaction time (faster operators call sooner)
         let reaction_delay_ms = rng.random_range(100..800);
@@ -497,6 +513,32 @@ mod tests {
 
             assert_eq!(manager.queue.len(), target, "max_stations={max_stations}");
         }
+    }
+
+    #[test]
+    fn create_caller_tolerates_degenerate_ranges() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+        let mut manager = CallerManager::new(
+            Box::new(FiniteCallsignSource { remaining: 10 }),
+            SimulationSettings {
+                // Equal bounds (reachable from the settings sliders) and reversed bounds
+                amplitude_min: 0.8,
+                amplitude_max: 0.8,
+                wpm_min: 36,
+                wpm_max: 28,
+                frequency_spread_hz: 0.0,
+                ..SimulationSettings::default()
+            },
+        );
+
+        let caller = manager
+            .create_caller(contest.as_ref(), &contest_settings, None, None)
+            .expect("caller should be created");
+
+        assert_eq!(caller.params.amplitude, 0.8);
+        assert_eq!(caller.params.frequency_offset_hz, 0.0);
+        assert!((28..=36).contains(&caller.params.wpm));
     }
 
     #[test]

@@ -359,7 +359,10 @@ impl Mixer {
         // Update noise filter to match tone frequency and bandwidth
         self.noise
             .update_filter(settings.tone_frequency_hz, settings.noise_bandwidth);
+        // The sample rate is fixed by the output device, not by the saved config.
+        let sample_rate = self.settings.sample_rate;
         self.settings = settings;
+        self.settings.sample_rate = sample_rate;
     }
 
     /// Clear all stations
@@ -451,5 +454,30 @@ impl Mixer {
         }
 
         (completed_stations, user_completed, completed_segments)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_settings_keeps_device_sample_rate() {
+        let device_settings = AudioSettings {
+            sample_rate: 48000,
+            ..AudioSettings::default()
+        };
+        let mut mixer = Mixer::new(48000, device_settings);
+
+        // Saved config carries its own (stale) sample rate.
+        let from_config = AudioSettings {
+            sample_rate: 44100,
+            master_volume: 0.3,
+            ..AudioSettings::default()
+        };
+        mixer.update_settings(from_config);
+
+        assert_eq!(mixer.settings.sample_rate, 48000);
+        assert_eq!(mixer.settings.master_volume, 0.3);
     }
 }

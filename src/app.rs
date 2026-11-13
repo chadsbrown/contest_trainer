@@ -78,11 +78,15 @@ pub struct ContestApp {
     cmd_tx: Sender<AudioCommand>,
     event_rx: Receiver<AudioEvent>,
     audio_engine: Option<AudioEngine>,
+    /// Why audio could not be started, if it could not
+    pub audio_error: Option<String>,
 
     // Contest and station management
     pub contest: Box<dyn Contest>,
     contest_registry: Vec<ContestDescriptor>,
     caller_manager: CallerManager,
+    /// Identifies the callsign source currently loaded (contest id, callsign file)
+    callsign_source_key: (String, Option<String>),
     user_serial: u32,
     cty: CtyDat,
 
@@ -120,8 +124,36 @@ pub struct ContestApp {
 impl ContestApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let load_result = AppSettings::load_with_notice();
-        let mut settings = load_result.settings;
-        let settings_notice = load_result.notice;
+        let settings = load_result.settings;
+
+        // Create channels for audio communication
+        let (cmd_tx, cmd_rx) = bounded::<AudioCommand>(64);
+        let (event_tx, event_rx) = bounded::<AudioEvent>(64);
+
+        // Create audio engine
+        let (audio_engine, audio_error) =
+            match AudioEngine::new(cmd_rx, event_tx, settings.audio.clone()) {
+                Ok(engine) => (Some(engine), None),
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("Failed to initialize audio: {}", e);
+                    (None, Some(e.to_string()))
+                }
+            };
+
+        let mut app = Self::with_parts(settings, load_result.notice, cmd_tx, event_rx);
+        app.audio_engine = audio_engine;
+        app.audio_error = audio_error;
+        app
+    }
+
+    /// Build the app around existing audio channels (no audio device required)
+    fn with_parts(
+        mut settings: AppSettings,
+        settings_notice: Option<String>,
+        cmd_tx: Sender<AudioCommand>,
+        event_rx: Receiver<AudioEvent>,
+    ) -> Self {
         let mut settings_changed = false;
 
         let contest_registry = contest::registry();
@@ -136,21 +168,6 @@ impl ContestApp {
                 settings_changed = true;
                 default_descriptor
             });
-
-        // Create channels for audio communication
-        let (cmd_tx, cmd_rx) = bounded::<AudioCommand>(64);
-        let (event_tx, event_rx) = bounded::<AudioEvent>(64);
-
-        // Create audio engine
-        let audio_engine = match AudioEngine::new(cmd_rx, event_tx, settings.audio.clone()) {
-            Ok(engine) => Some(engine),
-            Err(e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("Failed to initialize audio: {}", e);
-                let _ = e;
-                None
-            }
-        };
 
         // Create contest
         let contest = (active_descriptor.factory)();
@@ -174,6 +191,7 @@ impl ContestApp {
                     .expect("Failed to build callsign source")
             });
         let caller_manager = CallerManager::new(callsign_source, settings.simulation.clone());
+        let callsign_source_key = Self::callsign_source_key(contest.as_ref(), contest_settings);
 
         let noise_enabled = settings.audio.noise_level > 0.0;
         let saved_noise_level = settings.audio.noise_level;
@@ -193,10 +211,12 @@ impl ContestApp {
             last_qso_result: None,
             cmd_tx,
             event_rx,
-            audio_engine,
+            audio_engine: None,
+            audio_error: None,
             contest,
             contest_registry,
             caller_manager,
+            callsign_source_key,
             user_serial: 1,
             cty,
             show_settings: false,
@@ -216,6 +236,20 @@ impl ContestApp {
             file_dialog_target: None,
             export_result: None,
         }
+    }
+
+    /// What determines the callsign source: the contest and its callsign file
+    fn callsign_source_key(
+        contest: &dyn Contest,
+        contest_settings: &toml::Value,
+    ) -> (String, Option<String>) {
+        (
+            contest.id().to_string(),
+            contest_settings
+                .get("callsign_file")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        )
     }
 
     pub fn reset_score(&mut self) {
@@ -552,9 +586,17 @@ impl ContestApp {
         self.context.awaiting_user_exchange =
             exact_match && !self.context.progress.sent_our_exchange;
 
-        // Only expect a repeat when the callsign isn't an exact match.
-        self.context.expecting_callsign_repeat = true;
-        self.context.allow_callsign_repeat_ack = exact_match;
+        // Sending the right call settles any correction the caller was making.
+        if exact_match {
+            self.context.end_correction();
+        }
+
+        // A caller who now has both their call and our exchange has nothing to
+        // repeat - they go straight to sending their exchange. Otherwise they
+        // repeat their call (or acknowledge it, when we had it right).
+        let caller_has_everything = exact_match && self.context.progress.sent_our_exchange;
+        self.context.expecting_callsign_repeat = !caller_has_everything;
+        self.context.allow_callsign_repeat_ack = exact_match && !caller_has_everything;
 
         self.state = ContestState::UserTransmitting {
             tx_type: UserTxType::CallsignOnly,
@@ -729,11 +771,11 @@ impl ContestApp {
         self.last_qso_result = Some(result);
         self.state = ContestState::QsoComplete;
 
-        // Clear inputs and reset correction state
+        // Clear inputs; the QSO is over, so the worked station is no longer in play
         self.callsign_input.clear();
         self.clear_exchange_inputs();
         self.current_field = InputField::Callsign;
-        self.context.end_correction();
+        self.context.reset();
     }
 
     fn handle_agn_request(&mut self) {
@@ -908,6 +950,8 @@ impl ContestApp {
         );
 
         if responding.is_empty() {
+            // Nobody on frequency: don't leave the previous QSO's callers in play
+            self.context.reset();
             self.state = ContestState::Idle;
             return;
         }
@@ -952,7 +996,11 @@ impl ContestApp {
         let caller = match self.context.get_current_caller() {
             Some(c) => c.clone(),
             None => {
-                // No current caller - have active callers resend their callsign
+                // No current caller - have active callers resend their callsign.
+                // That answers any pending repeat request, so it must not carry
+                // over to whichever caller gets selected next.
+                self.context.expecting_callsign_repeat = false;
+                self.context.allow_callsign_repeat_ack = false;
                 for caller in &self.context.active_callers {
                     let _ = self
                         .cmd_tx
@@ -1012,6 +1060,8 @@ impl ContestApp {
             self.state = ContestState::StationTransmitting {
                 tx_type: StationTxType::Correction,
             };
+            // The fix has to be made in the callsign field
+            self.current_field = InputField::Callsign;
             return;
         }
 
@@ -1298,6 +1348,32 @@ impl ContestApp {
         });
     }
 
+    /// Rebuild the callsign source if the contest or its callsign file changed.
+    /// Reloading is slow and discards the caller queue, so unrelated settings
+    /// changes (speed, audio, ...) must not trigger it. Returns whether it reloaded.
+    fn reload_callsign_source_if_changed(&mut self) -> bool {
+        let contest_settings = self
+            .settings
+            .contest
+            .settings_for_mut(self.contest.as_ref());
+        let source_key = Self::callsign_source_key(self.contest.as_ref(), contest_settings);
+        if source_key == self.callsign_source_key {
+            return false;
+        }
+
+        let callsign_source = self
+            .contest
+            .callsign_source(contest_settings)
+            .unwrap_or_else(|_| {
+                self.contest
+                    .callsign_source(&self.contest.default_settings())
+                    .expect("Failed to build callsign source")
+            });
+        self.caller_manager.update_callsigns(callsign_source);
+        self.callsign_source_key = source_key;
+        true
+    }
+
     fn apply_settings_changes(&mut self) {
         if self.settings_changed {
             let active_id = self.settings.contest.active_contest_id.clone();
@@ -1329,15 +1405,8 @@ impl ContestApp {
                 .contest
                 .settings_for_mut(self.contest.as_ref());
             self.settings_error = self.contest.validate_settings(contest_settings).err();
-            let callsign_source = self
-                .contest
-                .callsign_source(contest_settings)
-                .unwrap_or_else(|_| {
-                    self.contest
-                        .callsign_source(&self.contest.default_settings())
-                        .expect("Failed to build callsign source")
-                });
-            self.caller_manager.update_callsigns(callsign_source);
+
+            self.reload_callsign_source_if_changed();
 
             self.caller_manager
                 .update_settings(self.settings.simulation.clone());
@@ -1506,6 +1575,190 @@ impl eframe::App for ContestApp {
                 });
         }
 
+        if let Some(error) = self.audio_error.clone() {
+            egui::Window::new("Audio Unavailable")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.label("No audio could be started, so nothing will be heard.");
+                    ui.add_space(8.0);
+                    ui.label(error);
+                    ui.add_space(8.0);
+                    ui.label("Check your audio output device and restart.");
+                });
+        }
+
         ctx.request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contest::Exchange;
+    use crate::messages::StationId;
+    use crossbeam_channel::unbounded;
+
+    /// App wired to channels nobody services: no audio device, no settings file.
+    /// Keeps the far ends alive so sends succeed.
+    struct Harness {
+        app: ContestApp,
+        _cmd_rx: Receiver<AudioCommand>,
+        _event_tx: Sender<AudioEvent>,
+    }
+
+    fn harness() -> Harness {
+        let (cmd_tx, cmd_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut settings = AppSettings::default();
+        // Deterministic flow: no random repeat requests, callers always correct
+        // a busted call, and nobody new shows up on frequency.
+        settings.simulation.agn_request_probability = 0.0;
+        settings.simulation.call_correction.correction_probability = 1.0;
+        settings.simulation.station_probability = 0.0;
+        Harness {
+            app: ContestApp::with_parts(settings, None, cmd_tx, event_rx),
+            _cmd_rx: cmd_rx,
+            _event_tx: event_tx,
+        }
+    }
+
+    fn caller(id: u32, callsign: &str) -> ActiveCaller {
+        ActiveCaller {
+            params: StationParams {
+                id: StationId(id),
+                callsign: callsign.to_string(),
+                exchange: Exchange::new(vec!["BOB".to_string(), "123".to_string()]),
+                frequency_offset_hz: 0.0,
+                wpm: 30,
+                amplitude: 1.0,
+                reaction_delay_ms: 0,
+            },
+        }
+    }
+
+    fn callers_arrive(app: &mut ContestApp, callers: Vec<ActiveCaller>) {
+        app.context.set_callers(callers);
+        app.state = ContestState::StationsCalling;
+    }
+
+    /// The user's transmission plays out in full, then the station answers.
+    fn finish_user_tx(app: &mut ContestApp) {
+        if let ContestState::UserTransmitting { tx_type } = app.state {
+            match tx_type {
+                UserTxType::Exchange => {
+                    app.context.progress.sent_their_call = true;
+                    app.context.progress.sent_our_exchange = true;
+                }
+                UserTxType::CallsignOnly => app.context.progress.sent_their_call = true,
+                UserTxType::ExchangeOnly => app.context.progress.sent_our_exchange = true,
+                UserTxType::Agn | UserTxType::Tu => {}
+            }
+        }
+        app.on_user_message_complete();
+        if app.state == ContestState::WaitingForStation {
+            app.handle_station_response();
+        }
+    }
+
+    const SENDING_EXCHANGE: ContestState = ContestState::StationTransmitting {
+        tx_type: StationTxType::SendingExchange,
+    };
+
+    #[test]
+    fn repeat_request_to_pileup_does_not_leak_into_next_transmission() {
+        let mut h = harness();
+        let app = &mut h.app;
+        callers_arrive(app, vec![caller(1, "W1AW"), caller(2, "K3LR")]);
+
+        // "?" to the whole pileup: everyone sends their call again
+        app.handle_callsign_agn_request();
+        finish_user_tx(app);
+        assert_eq!(app.state, ContestState::StationsCalling);
+
+        // Now we copy one and send call + exchange: they must answer with
+        // their exchange, not repeat their call again.
+        app.callsign_input = "W1AW".to_string();
+        app.handle_callsign_submit();
+        finish_user_tx(app);
+        assert_eq!(app.state, SENDING_EXCHANGE);
+    }
+
+    #[test]
+    fn correcting_the_call_with_f5_gets_the_exchange() {
+        let mut h = harness();
+        let app = &mut h.app;
+        callers_arrive(app, vec![caller(1, "W1AW")]);
+
+        // Busted call: the station corrects us and focus returns to the call
+        app.callsign_input = "W1AX".to_string();
+        app.handle_callsign_submit();
+        finish_user_tx(app);
+        assert_eq!(
+            app.state,
+            ContestState::StationTransmitting {
+                tx_type: StationTxType::Correction
+            }
+        );
+        assert_eq!(app.current_field, InputField::Callsign);
+        app.on_station_audio_complete(StationId(1));
+        assert_eq!(app.state, ContestState::StationsCalling);
+
+        // Fix it and send just the call: correction is over, exchange follows
+        app.callsign_input = "W1AW".to_string();
+        app.handle_f5_his_call();
+        finish_user_tx(app);
+        assert!(!app.context.correction_in_progress);
+        assert_eq!(app.state, SENDING_EXCHANGE);
+    }
+
+    #[test]
+    fn worked_station_is_gone_after_logging() {
+        let mut h = harness();
+        let app = &mut h.app;
+        callers_arrive(app, vec![caller(1, "W1AW")]);
+
+        app.callsign_input = "W1AW".to_string();
+        app.handle_callsign_submit();
+        finish_user_tx(app);
+        assert_eq!(app.state, SENDING_EXCHANGE);
+
+        app.exchange_inputs = vec!["BOB".to_string(), "123".to_string()];
+        app.handle_exchange_submit();
+        assert_eq!(app.score.qso_count, 1);
+        assert_eq!(app.state, ContestState::QsoComplete);
+
+        // TU finishes with nobody tail-ending
+        app.on_user_message_complete();
+        assert_eq!(app.state, ContestState::Idle);
+
+        // F2 / Enter must not raise the worked station again or log twice
+        app.handle_f2_exchange();
+        assert_eq!(app.state, ContestState::Idle);
+        app.handle_exchange_submit();
+        assert_eq!(app.score.qso_count, 1);
+    }
+
+    #[test]
+    fn callsign_source_reloads_only_when_its_file_changes() {
+        let mut h = harness();
+        let app = &mut h.app;
+
+        // Unrelated settings changes leave the source (and caller queue) alone
+        app.settings.user.wpm += 1;
+        app.settings.audio.noise_level = 0.1;
+        assert!(!app.reload_callsign_source_if_changed());
+
+        let contest_settings = app.settings.contest.settings_for_mut(app.contest.as_ref());
+        contest_settings
+            .as_table_mut()
+            .expect("contest settings are a table")
+            .insert(
+                "callsign_file".to_string(),
+                toml::Value::String("some_other_file.txt".to_string()),
+            );
+        assert!(app.reload_callsign_source_if_changed());
+        assert!(!app.reload_callsign_source_if_changed());
     }
 }
