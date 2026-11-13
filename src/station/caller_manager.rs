@@ -6,7 +6,7 @@ use crate::config::{PileupSettings, SimulationSettings};
 use crate::contest::{CallsignSource, Contest};
 use crate::cty::CtyDat;
 use crate::messages::{StationId, StationParams};
-use crate::state::{QsoContext, QsoProgress};
+use crate::state::QsoProgress;
 
 /// How a caller should respond based on what they've heard
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,8 +17,6 @@ pub enum CallerResponse {
     RequestAgn,
     /// Caller heard both call and exchange - sends their exchange
     SendExchange,
-    /// Caller waits silently for the user's exchange
-    Wait,
 }
 
 impl CallerResponse {
@@ -38,16 +36,6 @@ impl CallerResponse {
             // If we haven't sent their call, they're confused regardless
             (false, _) => CallerResponse::Confused,
         }
-    }
-
-    /// Determine caller response using both QSO progress and context.
-    pub fn from_progress_and_context(progress: &QsoProgress, context: &QsoContext) -> Self {
-        if context.awaiting_user_exchange && progress.sent_their_call && !progress.sent_our_exchange
-        {
-            return CallerResponse::Wait;
-        }
-
-        Self::from_progress(progress)
     }
 }
 
@@ -395,12 +383,6 @@ impl CallerManager {
         self.active_ids.retain(|id| *id != station_id);
     }
 
-    /// Called when audio for a station completes
-    pub fn station_audio_complete(&mut self, _id: StationId) {
-        // Currently just for tracking - caller remains in active state
-        // until either worked or CQ restart
-    }
-
     /// Try to spawn tail-enders after QSO completion
     /// Returns list of tail-enders that will call (uses geometric decay for multiple callers)
     pub fn try_spawn_tail_ender(
@@ -592,8 +574,6 @@ mod tests {
         let progress = QsoProgress {
             sent_their_call: false,
             sent_our_exchange: false,
-            received_their_call: false,
-            received_their_exchange: false,
         };
         assert_eq!(
             CallerResponse::from_progress(&progress),
@@ -604,8 +584,6 @@ mod tests {
         let progress = QsoProgress {
             sent_their_call: true,
             sent_our_exchange: false,
-            received_their_call: false,
-            received_their_exchange: false,
         };
         assert_eq!(
             CallerResponse::from_progress(&progress),
@@ -616,8 +594,6 @@ mod tests {
         let progress = QsoProgress {
             sent_their_call: true,
             sent_our_exchange: true,
-            received_their_call: false,
-            received_their_exchange: false,
         };
         assert_eq!(
             CallerResponse::from_progress(&progress),
@@ -628,8 +604,6 @@ mod tests {
         let progress = QsoProgress {
             sent_their_call: false,
             sent_our_exchange: true,
-            received_their_call: false,
-            received_their_exchange: false,
         };
         assert_eq!(
             CallerResponse::from_progress(&progress),
@@ -771,22 +745,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn test_caller_response_waits_when_awaiting_exchange() {
-        let progress = QsoProgress {
-            sent_their_call: true,
-            sent_our_exchange: false,
-            received_their_call: false,
-            received_their_exchange: false,
-        };
-        let mut context = QsoContext::new();
-        context.awaiting_user_exchange = true;
-
-        assert_eq!(
-            CallerResponse::from_progress_and_context(&progress, &context),
-            CallerResponse::Wait
-        );
     }
 }
