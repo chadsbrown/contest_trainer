@@ -1,7 +1,7 @@
 use super::morse::{text_to_morse, MorseElement, MorseTimer, ToneGenerator};
 use super::noise::NoiseGenerator;
 use crate::config::{AudioSettings, QsbSettings};
-use crate::messages::{MessageSegment, MessageSegmentType, StationId, StationParams};
+use crate::messages::{MessageId, MessageSegment, MessageSegmentType, StationId, StationParams};
 use rand::Rng;
 
 /// QSB (fading) oscillator that produces natural-sounding signal fading
@@ -198,6 +198,7 @@ impl ActiveStation {
 /// User station with segment tracking for element-level completion events
 /// Each segment emits a completion event when finished
 pub struct SegmentedUserStation {
+    pub id: MessageId,
     pub elements: Vec<MorseElement>,
     pub current_element_idx: usize,
     pub samples_in_element: usize,
@@ -213,7 +214,13 @@ pub struct SegmentedUserStation {
 }
 
 impl SegmentedUserStation {
-    pub fn new(segments: &[MessageSegment], wpm: u8, sample_rate: u32, frequency_hz: f32) -> Self {
+    pub fn new(
+        id: MessageId,
+        segments: &[MessageSegment],
+        wpm: u8,
+        sample_rate: u32,
+        frequency_hz: f32,
+    ) -> Self {
         let mut all_elements = Vec::new();
         let mut segment_boundaries = Vec::new();
 
@@ -239,6 +246,7 @@ impl SegmentedUserStation {
         };
 
         Self {
+            id,
             elements: all_elements,
             current_element_idx: 0,
             samples_in_element,
@@ -345,8 +353,14 @@ impl Mixer {
     }
 
     /// Start playing a segmented user message with element-level tracking
-    pub fn play_user_message_segmented(&mut self, segments: &[MessageSegment], wpm: u8) {
+    pub fn play_user_message_segmented(
+        &mut self,
+        id: MessageId,
+        segments: &[MessageSegment],
+        wpm: u8,
+    ) {
         self.segmented_user_station = Some(SegmentedUserStation::new(
+            id,
             segments,
             wpm,
             self.settings.sample_rate,
@@ -363,7 +377,15 @@ impl Mixer {
         // Update noise filter to match tone frequency and bandwidth
         self.noise
             .update_filter(settings.tone_frequency_hz, settings.noise_bandwidth);
+        // The sample rate is fixed by the output device, not by the saved config.
+        let sample_rate = self.settings.sample_rate;
         self.settings = settings;
+        self.settings.sample_rate = sample_rate;
+    }
+
+    /// Stop the user's transmission, leaving stations untouched
+    pub fn stop_user(&mut self) {
+        self.segmented_user_station = None;
     }
 
     /// Clear all stations
@@ -373,13 +395,17 @@ impl Mixer {
     }
 
     /// Fill a buffer with mixed audio
-    /// Returns: (completed_station_ids, user_completed, completed_segments)
+    /// Returns: (completed_station_ids, completed_user_message, completed_segments)
     pub fn fill_buffer(
         &mut self,
         buffer: &mut [f32],
-    ) -> (Vec<StationId>, bool, Vec<MessageSegmentType>) {
+    ) -> (
+        Vec<StationId>,
+        Option<MessageId>,
+        Vec<(MessageId, MessageSegmentType)>,
+    ) {
         let mut completed_stations = Vec::new();
-        let mut user_completed = false;
+        let mut user_completed = None;
         let mut completed_segments = Vec::new();
 
         // Clear buffer
@@ -428,15 +454,15 @@ impl Mixer {
                 }
                 // Check for segment completion after each sample
                 if let Some(segment_type) = user.check_segment_completion() {
-                    completed_segments.push(segment_type);
+                    completed_segments.push((user.id, segment_type));
                 }
             }
             // Final check for any remaining segment completions
             while let Some(segment_type) = user.check_segment_completion() {
-                completed_segments.push(segment_type);
+                completed_segments.push((user.id, segment_type));
             }
             if user.is_completed() {
-                user_completed = true;
+                user_completed = Some(user.id);
                 self.segmented_user_station = None;
             }
         }
@@ -455,5 +481,30 @@ impl Mixer {
         }
 
         (completed_stations, user_completed, completed_segments)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_settings_keeps_device_sample_rate() {
+        let device_settings = AudioSettings {
+            sample_rate: 48000,
+            ..AudioSettings::default()
+        };
+        let mut mixer = Mixer::new(48000, device_settings);
+
+        // Saved config carries its own (stale) sample rate.
+        let from_config = AudioSettings {
+            sample_rate: 44100,
+            master_volume: 0.3,
+            ..AudioSettings::default()
+        };
+        mixer.update_settings(from_config);
+
+        assert_eq!(mixer.settings.sample_rate, 48000);
+        assert_eq!(mixer.settings.master_volume, 0.3);
     }
 }

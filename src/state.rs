@@ -14,10 +14,17 @@ pub struct QsoProgress {
     pub sent_their_call: bool,
     /// We have completed sending our exchange
     pub sent_our_exchange: bool,
-    /// We have received the caller's callsign (user entered something)
-    pub received_their_call: bool,
-    /// We have received the caller's exchange (user entered something)
-    pub received_their_exchange: bool,
+}
+
+/// A request from the user for the caller to repeat their callsign.
+///
+/// It is answered once, by whoever replies next, and then it is gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallsignRepeat {
+    /// The caller sends their callsign again ("?" or a partial/wrong call)
+    Required,
+    /// We sent their call correctly: they may just acknowledge with "R R"
+    MayAcknowledge,
 }
 
 impl QsoProgress {
@@ -48,14 +55,11 @@ pub struct QsoContext {
     pub confused_attempts: u8,
     /// Timer for waiting states
     pub wait_until: Option<Instant>,
-    /// Whether we're expecting caller to repeat their callsign (after partial query or F8)
-    pub expecting_callsign_repeat: bool,
-    /// Whether the caller can acknowledge a correct callsign with "R R"
-    pub allow_callsign_repeat_ack: bool,
+    /// Pending request for the caller to repeat their callsign (F5 or F8).
+    /// Taken by the next station response, whoever gives it.
+    pub callsign_repeat_request: Option<CallsignRepeat>,
     /// Whether the caller has already sent their exchange in this QSO
     pub caller_exchange_sent_once: bool,
-    /// Whether we expect to send our exchange next (suppress caller response)
-    pub awaiting_user_exchange: bool,
 }
 
 impl Default for QsoContext {
@@ -74,10 +78,8 @@ impl QsoContext {
             correction_attempts: 0,
             confused_attempts: 0,
             wait_until: None,
-            expecting_callsign_repeat: false,
-            allow_callsign_repeat_ack: false,
+            callsign_repeat_request: None,
             caller_exchange_sent_once: false,
-            awaiting_user_exchange: false,
         }
     }
 
@@ -90,10 +92,8 @@ impl QsoContext {
         self.correction_attempts = 0;
         self.confused_attempts = 0;
         self.wait_until = None;
-        self.expecting_callsign_repeat = false;
-        self.allow_callsign_repeat_ack = false;
+        self.callsign_repeat_request = None;
         self.caller_exchange_sent_once = false;
-        self.awaiting_user_exchange = false;
     }
 
     /// Set up context for a new set of callers
@@ -114,15 +114,6 @@ impl QsoContext {
     /// Get the current caller (single caller or selected from pileup)
     pub fn get_current_caller(&self) -> Option<&ActiveCaller> {
         self.current_caller.as_ref()
-    }
-
-    /// Determine whether F8 should request a callsign repeat.
-    pub fn wants_callsign_repeat(&self) -> bool {
-        if self.correction_in_progress || self.expecting_callsign_repeat {
-            return true;
-        }
-
-        !self.progress.received_their_call
     }
 
     /// Increment correction attempt
@@ -151,11 +142,6 @@ impl QsoContext {
             Some(until) => Instant::now() >= until,
             None => true,
         }
-    }
-
-    /// Clear the wait timer
-    pub fn clear_wait(&mut self) {
-        self.wait_until = None;
     }
 }
 
@@ -211,7 +197,8 @@ pub enum ContestState {
     /// Brief pause before station responds (wait_until in QsoContext)
     WaitingForStation,
 
-    /// Station is transmitting (type in tx_type)
+    /// The selected station's turn (type in tx_type). The state is kept after
+    /// their audio ends, until the user acts on what they sent.
     StationTransmitting { tx_type: StationTxType },
 
     /// QSO complete, TU being sent or just sent
@@ -219,6 +206,19 @@ pub enum ContestState {
 }
 
 impl ContestState {
+    /// Whether the user can act on the callsign now: submit one (Enter) or ask
+    /// for it again (F8). True whenever callers are waiting on us, including
+    /// after a caller has corrected our copy or asked us for a repeat.
+    pub fn accepts_callsign_entry(&self) -> bool {
+        matches!(
+            self,
+            ContestState::StationsCalling
+                | ContestState::StationTransmitting {
+                    tx_type: StationTxType::Correction | StationTxType::RequestingAgn
+                }
+        )
+    }
+
     /// Get status text and color for UI display
     pub fn status_text(&self, context: &QsoContext) -> (&'static str, StatusColor) {
         match self {
@@ -260,9 +260,10 @@ impl ContestState {
                 StationTxType::RequestingAgn => {
                     ("Station requests repeat - press F2", StatusColor::Orange)
                 }
-                StationTxType::Correction => {
-                    ("Station correcting callsign...", StatusColor::Orange)
-                }
+                StationTxType::Correction => (
+                    "Station corrected callsign - fix and press Enter",
+                    StatusColor::Orange,
+                ),
             },
             ContestState::QsoComplete => ("QSO logged! Press F1 for next", StatusColor::Green),
         }
@@ -288,8 +289,6 @@ mod tests {
         let progress = QsoProgress::new();
         assert!(!progress.sent_their_call);
         assert!(!progress.sent_our_exchange);
-        assert!(!progress.received_their_call);
-        assert!(!progress.received_their_exchange);
     }
 
     #[test]
@@ -297,15 +296,11 @@ mod tests {
         let mut progress = QsoProgress::new();
         progress.sent_their_call = true;
         progress.sent_our_exchange = true;
-        progress.received_their_call = true;
-        progress.received_their_exchange = true;
 
         progress.reset();
 
         assert!(!progress.sent_their_call);
         assert!(!progress.sent_our_exchange);
-        assert!(!progress.received_their_call);
-        assert!(!progress.received_their_exchange);
     }
 
     #[test]

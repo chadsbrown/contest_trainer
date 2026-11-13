@@ -33,10 +33,13 @@ This design enables:
 
 ### Audio Events
 
-Three types of audio events drive state transitions:
-- **UserMessageComplete**: User's transmission finished (CQ, exchange, TU, AGN)
-- **UserSegmentComplete(type)**: A segment of user's message finished (updates QsoProgress)
-- **StationComplete(id)**: A station finished transmitting
+Two types of audio events drive state transitions:
+- **UserSegmentComplete(id, type)**: A segment of user's message finished (updates QsoProgress)
+- **UserMessageComplete(id)**: User's transmission finished (CQ, exchange, TU, AGN)
+
+Every user message gets a `MessageId`. The app remembers the id of the message currently on the air and ignores events carrying any other id, so a message that was stopped (Escape) or replaced (another key pressed mid-transmission) can never advance the state. A stopped message emits no completion event.
+
+Nothing waits on a station finishing its transmission; see `StationTransmitting` below.
 
 ## Data Structures
 
@@ -48,10 +51,6 @@ pub struct QsoProgress {
     pub sent_their_call: bool,
     /// We have completed sending our exchange
     pub sent_our_exchange: bool,
-    /// We have received the caller's callsign (user entered something)
-    pub received_their_call: bool,
-    /// We have received the caller's exchange (user entered something)
-    pub received_their_exchange: bool,
 }
 ```
 
@@ -67,41 +66,33 @@ pub struct QsoContext {
     pub correction_in_progress: bool,
     pub correction_attempts: u8,
     pub wait_until: Option<Instant>,
-    pub expecting_callsign_repeat: bool,
-    pub allow_callsign_repeat_ack: bool,
+    pub callsign_repeat_request: Option<CallsignRepeat>,
     pub caller_exchange_sent_once: bool,
-    pub awaiting_user_exchange: bool,
+}
+
+pub enum CallsignRepeat {
+    Required,       // caller sends their callsign again
+    MayAcknowledge, // we sent it correctly: caller may send "R R" instead
 }
 ```
 
 Key fields:
 - `current_caller`: The single caller we're currently working with
 - `active_callers`: All callers responding (for pileup situations)
-- `correction_in_progress`: Whether the station is correcting the user's callsign copy
-- `expecting_callsign_repeat`: Set after F5/F8 to tell `handle_station_response()` to have caller repeat their callsign
-- `allow_callsign_repeat_ack`: When true (F5 with exact match), caller may send "R R" instead of repeating the full callsign
-- `caller_exchange_sent_once`: Tracks whether the caller has already sent their exchange in this QSO
-- `awaiting_user_exchange`: Set when we have the caller's callsign and are waiting on the user to send exchange (caller should stay silent)
+- `correction_in_progress`: Whether the station is correcting the user's callsign copy. Lasts until the right call is sent (Enter or F5) or the caller gives up correcting.
+- `callsign_repeat_request`: A one-shot request, set by F5/F8, for the caller to repeat their callsign. The next station response takes it, whoever gives it, so it cannot carry over to a later transmission.
+- `caller_exchange_sent_once`: Tracks whether the caller has already sent their exchange in this QSO; used to suppress random AGN requests after the first exchange.
 
-### How QsoProgress and QsoContext Are Updated
-
-- `sent_their_call` / `sent_our_exchange`: Set by `UserSegmentComplete` events when segmented user messages finish each element.
-- `received_their_call`: Set when the user submits a callsign (Enter in callsign field).
-- `received_their_exchange`: Set when the user submits an exchange (Enter in any exchange field).
-- `expecting_callsign_repeat`: Set by F5/F8 in callsign field.
-- `allow_callsign_repeat_ack`: Set by F5 when the entered callsign is an exact match.
-- `awaiting_user_exchange`: Set by F5 when the entered callsign matches the selected caller and our exchange has not been sent yet. Cleared when we send exchange (F2 or full exchange).
-- `caller_exchange_sent_once`: Set when the caller sends their exchange; used to suppress random AGN requests after the first exchange.
+The context is reset when a QSO is logged, when a TU ends with no tail-ender, and when CQ is sent, so a worked station is never left in play.
 
 ### Where Updates Happen in Code
 
-- `process_audio_events()` in `src/app.rs`: Updates `sent_their_call` and `sent_our_exchange` on `UserSegmentComplete`.
-- `handle_callsign_submit()` in `src/app.rs`: Sets `received_their_call` and selects the current caller.
-- `handle_exchange_submit()` in `src/app.rs`: Sets `received_their_exchange` and logs the QSO.
-- `handle_f5_his_call()` in `src/app.rs`: Sets `expecting_callsign_repeat` (non-exact match) or `awaiting_user_exchange` (exact match).
-- `send_exchange()` / `send_exchange_only()` in `src/app.rs`: Clears `awaiting_user_exchange`.
-- `handle_station_response()` in `src/app.rs`: Uses `CallerResponse::from_progress_and_context()` to decide what the caller does next.
-- `caller_exchange_sent_once`: Set when the caller actually sends their exchange; used to suppress random AGN requests after the first exchange.
+- `process_audio_events()` in `src/app.rs`: Updates `sent_their_call` and `sent_our_exchange` on `UserSegmentComplete` for the current message.
+- `handle_callsign_submit()` in `src/app.rs`: Selects the current caller and decides whether they will correct us.
+- `handle_exchange_submit()` in `src/app.rs`: Logs the QSO and resets the context.
+- `handle_f5_his_call()` / `handle_callsign_agn_request()` in `src/app.rs`: Set `callsign_repeat_request`.
+- `handle_station_response()` in `src/app.rs`: Takes `callsign_repeat_request`, then uses `correction_in_progress` and `CallerResponse::from_progress()` to decide what the caller does next.
+- `stop_user_transmission()` in `src/app.rs`: Escape; see below.
 
 ### ContestState - Minimal State Enum
 
@@ -153,15 +144,14 @@ The `CallerResponse` enum determines how a caller responds based on `QsoProgress
 | true | false | RequestAgn (sends "AGN" or "?") |
 | true | true | SendExchange (sends their exchange) |
 
-If `awaiting_user_exchange` is true and we have sent their callsign but not our exchange, `CallerResponse::Wait` is returned so the caller stays silent.
+This is implemented in `CallerResponse::from_progress()`.
 
-This is implemented in `CallerResponse::from_progress_and_context()` (which delegates to `from_progress()` when no context override applies).
+**Order of decisions in `handle_station_response()`:**
 
-**Special cases in `handle_station_response()`:**
-
-1. **`expecting_callsign_repeat = true`**: Caller repeats their callsign, or may send "R R" if `allow_callsign_repeat_ack` is true (F5 with exact match)
-2. **`correction_in_progress = true`**: Caller sends correction (75% once, 25% twice for emphasis)
-3. **Otherwise**: Uses `CallerResponse::from_progress_and_context()` to determine response
+1. **No caller selected** (pileup, nothing matched): all callers send their callsign again
+2. **`callsign_repeat_request` pending**: Caller repeats their callsign, or may send "R R" for `MayAcknowledge` (F5 with exact match)
+3. **`correction_in_progress = true`**: Caller sends correction (75% once, 25% twice for emphasis); focus returns to the callsign field
+4. **Otherwise**: Uses `CallerResponse::from_progress()` to determine response
 
 ## State Transitions
 
@@ -171,11 +161,11 @@ This is implemented in `CallerResponse::from_progress_and_context()` (which dele
 |-------|-------------|
 | `Idle` | Waiting for user to start |
 | `CallingCq` | User is sending CQ message |
-| `WaitingForCallers` | CQ finished, 300ms delay before stations respond |
+| `WaitingForCallers` | CQ finished, 200ms delay before stations respond (or nobody does: back to `Idle`) |
 | `StationsCalling` | One or more stations have sent/are sending callsigns |
 | `UserTransmitting { tx_type }` | User is transmitting (type specifies what) |
 | `WaitingForStation` | Brief pause (250ms) before station responds |
-| `StationTransmitting { tx_type }` | Station is transmitting (type specifies what) |
+| `StationTransmitting { tx_type }` | The selected station's turn (type specifies what). Kept after their audio ends, until the user acts |
 | `QsoComplete` | QSO logged, TU being sent |
 
 ### Main Flow (Happy Path)
@@ -228,8 +218,9 @@ Any state with active callers
   │
   └─[F5]─► (StopAll audio)
            (Select matching caller if found)
-           (If exact match and exchange not sent: awaiting_user_exchange = true)
-           (Else: expecting_callsign_repeat = true)
+           (Exact match: ends any correction; request = MayAcknowledge,
+            or none if our exchange was already sent)
+           (Otherwise: request = Required)
                │
                ▼
            UserTransmitting { CallsignOnly }
@@ -237,8 +228,8 @@ Any state with active callers
                ▼ [UserMessageComplete]
            WaitingForStation
                │
-               ├─[CallerResponse::Wait]─► StationsCalling (caller stays silent, waiting for F2)
-               └─[expecting_callsign_repeat = true]─► StationsCalling (caller repeats their callsign)
+               ├─[repeat requested]─► StationsCalling (caller repeats their callsign or sends "R R")
+               └─[exact match, exchange already sent]─► StationTransmitting { SendingExchange }
 ```
 
 **Multiple AGN requests for callsign (e.g., user presses F5 three times):**
@@ -263,14 +254,14 @@ StationsCalling
 
 ### F8 - Request AGN
 
-F8 behavior depends on which field has focus:
+F8 asks the station to repeat what they are on: their exchange once they have sent it, their callsign before that. Cursor position does not matter.
 
-**In callsign field (`StationsCalling` state):**
+**Before the station has sent its exchange (`StationsCalling`, or after a correction / AGN request):**
 ```
 StationsCalling
   │
   └─[F8]─► (StopAll audio)
-           (Set expecting_callsign_repeat = true)
+           (Set callsign_repeat_request = Required)
                │
                ▼
            UserTransmitting { Agn }
@@ -278,11 +269,11 @@ StationsCalling
                ▼ [UserMessageComplete]
            WaitingForStation
                │
-               ▼ [250ms, expecting_callsign_repeat = true]
+               ▼ [250ms, repeat requested]
            StationsCalling (caller repeats their callsign)
 ```
 
-**In any exchange field (`StationTransmitting { SendingExchange }` state):**
+**Once the station has sent its exchange (`StationTransmitting { SendingExchange }` state):**
 ```
 StationTransmitting { SendingExchange }
   │
@@ -297,8 +288,6 @@ StationTransmitting { SendingExchange }
                ▼ [250ms, CallerResponse::SendExchange]
            StationTransmitting { SendingExchange } (caller resends exchange)
 ```
-
-**Note:** F8 routing now prefers callsign repeat during correction flow (or when no callsign has been copied), regardless of cursor position. In those cases F8 triggers the callsign-repeat path.
 
 **Multiple AGN requests for exchange:**
 
@@ -329,6 +318,7 @@ Any state with active callers
   │
   └─[F2]─► (StopAll audio)
            (Select matching caller if found)
+           (Focus moves to the exchange field)
                │
                ▼
            UserTransmitting { ExchangeOnly }
@@ -363,10 +353,9 @@ StationsCalling
                ▼ [250ms, correction_in_progress = true]
            StationTransmitting { Correction }
                │  (Station sends callsign once (75%) or twice (25%))
-               │
-               ▼ [StationComplete]
-           StationsCalling
-               │  (Status: "Fix callsign and press Enter")
+               │  (Focus returns to the callsign field)
+               │  (Status: "Station corrected callsign - fix and press Enter")
+               │  (No need to wait for the station to finish)
                │
                ├─[Enter (correct)]─► correction ends, normal flow
                │
@@ -374,9 +363,11 @@ StationsCalling
                │
                ├─[Enter (attempts >= max)]─► correction ends, busted call
                │
-               ├─[F5]─► Send callsign, expecting_callsign_repeat = true
+               ├─[F5 (correct)]─► correction ends, station sends exchange
                │
-               └─[F8]─► Request repeat, expecting_callsign_repeat = true
+               ├─[F5 (still wrong)]─► station repeats callsign
+               │
+               └─[F8]─► station repeats callsign
 ```
 
 ### Caller Requests AGN Flow
@@ -391,9 +382,6 @@ WaitingForStation
            ▼
        StationTransmitting { RequestingAgn }
            │  (Station sends "AGN" or "?")
-           │
-           ▼ [StationComplete]
-       StationsCalling
            │  (Status: "Station requests repeat - press F2")
            │
            └─[F2]─► UserTransmitting { ExchangeOnly }
@@ -432,6 +420,19 @@ The `CallerManager` handles persistence:
 3. Callers who exceeded patience are marked `GaveUp`
 4. After CQ completes, surviving callers may respond again
 
+### Escape - Stop Transmission
+
+Escape stops only the user's transmission (stations keep sending) and leaves the state somewhere the user can carry on from:
+
+| State when Escape is pressed | Result |
+|------------------------------|--------|
+| `CallingCq` | `Idle` |
+| `UserTransmitting { Exchange / CallsignOnly / ExchangeOnly / Agn }` | `StationsCalling` (callers still waiting; Enter, F2, F5, F8 all work) |
+| `UserTransmitting { Tu }` / `QsoComplete` | `Idle` (a cut-off TU draws no tail-enders) |
+| Anything else | Unchanged |
+
+`QsoProgress` keeps whatever segments had finished before the stop, so a caller who heard their call but not our exchange asks for a repeat rather than starting over.
+
 ## Key Bindings
 
 | Key | Context | Action |
@@ -443,12 +444,12 @@ The `CallerManager` handles persistence:
 | F2 | Any (with active caller) | Send exchange only |
 | F3 | Any | Send TU |
 | F5 | Any (with active caller) | Send his call (callsign only) |
-| F8 | Callsign field | Request callsign repeat |
-| F8 | Any exchange field | Request exchange repeat |
+| F8 | Before station's exchange | Request callsign repeat |
+| F8 | After station's exchange | Request exchange repeat |
 | F12 | Any | Wipe (clear callsign + exchange fields) |
 | Tab | Any | Move to next field (Shift+Tab moves to previous field) |
 | Space | Any | Move to next field (Shift+Space moves to previous field) |
-| Escape | Any | Stop transmission (does not clear fields) |
+| Escape | Any | Stop our transmission (does not clear fields); see below |
 | Up/Down | Any | Adjust user WPM |
 
 **Focus note:** After entering a callsign, focus moves to the contest-preferred exchange field (first field with `focus_on_enter = true`), otherwise the first exchange field.
@@ -475,10 +476,18 @@ Note: `reaction_delay_ms` (100-800ms) is stored in `StationParams` and applied a
 - `Worked` - Successfully completed QSO
 
 ### Key Methods
-- `on_cq_complete()` - Select callers to respond to CQ
+- `on_cq_complete()` - Select callers to respond to CQ (called once per CQ; may be nobody)
 - `on_cq_restart()` - Handle F1 during active callers (increment attempts, set retry delay)
 - `on_qso_complete(id)` - Mark caller as worked
-- `try_spawn_tail_ender()` - Attempt to spawn a tail-ender after QSO
+- `on_tu_complete()` - After a TU: pileup losers call again, new stations may tail-end
+
+### Arrivals
+
+Stations find the frequency at random times (a Poisson process) at a rate of `station_probability * max_simultaneous_stations / 6` per second. Arrivals are added whenever a CQ or TU completes, for the time elapsed since the last check (capped at 10 seconds), up to a queue capacity of `ceil(max_simultaneous_stations * 2.5)`. Because the number depends on elapsed time rather than on how often the queue is checked, a quiet band produces unanswered CQs: the state goes back to `Idle` and the user calls again.
+
+### After a TU
+
+A TU is as good as a CQ to anyone listening. Callers left in `Calling` (they lost the pileup) return to `Waiting` and respond with their normal call probability, ahead of stations that have not called yet. Those tail-end with geometric decay (`call_probability * 0.5^slot`).
 
 ### Caller Selection and Retry Probability
 
@@ -519,7 +528,7 @@ let segments = vec![
 ];
 ```
 
-The audio engine tracks segment boundaries and emits `UserSegmentComplete` events as each segment finishes. This allows accurate `QsoProgress` updates even if the transmission is interrupted (e.g., by Escape or F1).
+The audio engine tracks segment boundaries and emits `UserSegmentComplete` events as each segment finishes. This allows accurate `QsoProgress` updates even if the transmission is interrupted by Escape.
 
 ### MessageSegmentType
 - `TheirCallsign` - The caller's callsign
@@ -579,19 +588,18 @@ Note: Caller reaction time is now applied directly in the audio stream, creating
 
 | Command | Description |
 |---------|-------------|
-| `PlayUserMessage { message, wpm }` | Play user's CW message (plain) |
-| `PlayUserMessageSegmented { segments, wpm }` | Play segmented message with progress tracking |
+| `PlayUserMessageSegmented { id, segments, wpm }` | Play segmented message with progress tracking |
 | `StartStation(StationParams)` | Start a station sending CW |
 | `StopAll` | Stop all audio (except noise) |
+| `StopUser` | Stop the user's transmission only |
 | `UpdateSettings(AudioSettings)` | Update audio configuration |
 
 ## Audio Events
 
 | Event | Description |
 |-------|-------------|
-| `UserMessageComplete` | User's transmission finished |
-| `UserSegmentComplete(type)` | A segment of user message finished |
-| `StationComplete(id)` | Station finished transmitting |
+| `UserMessageComplete(id)` | User's transmission finished |
+| `UserSegmentComplete(id, type)` | A segment of user message finished |
 
 ## Future: 2BSIQ Readiness
 

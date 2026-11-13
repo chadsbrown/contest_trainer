@@ -24,7 +24,7 @@ A Morse code contest simulator for practicing CW contest operating skills.
 | Enter | Submit current field (or send CQ when callsign is empty) |
 | Tab | Move to next field (Shift+Tab moves backward) |
 | Space | Move to next field (Shift+Space moves backward) |
-| Esc | Stop transmission audio |
+| Esc | Stop your transmission |
 
 Notes:
 - If you press **F5** after copying the callsign correctly, the station may acknowledge with **"R R"** instead of repeating the full callsign.
@@ -125,7 +125,7 @@ These fields are defined by the selected contest and can vary by contest type.
 - **Values**: 1-5
 
 ### Station Probability
-- **Purpose**: Probability that a station will respond after your CQ
+- **Purpose**: How busy the band is. Higher values bring new stations to your frequency more often (on average one every `6 / (Station Probability x Max Simultaneous Stations)` seconds while you are operating). At low values some CQs go unanswered and you have to call again.
 - **Default**: `0.7` (70%)
 - **Values**: 0.1-1.0
 

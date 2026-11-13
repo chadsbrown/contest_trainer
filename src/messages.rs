@@ -5,6 +5,11 @@ use crate::contest::Exchange;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StationId(pub u32);
 
+/// Identifies one transmission by the user, so that completion events can be
+/// matched to the message they belong to (and stale ones ignored)
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct MessageId(pub u32);
+
 /// Type of segment within a user message
 /// Used for element-level tracking of what has been transmitted
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,6 +54,7 @@ pub enum AudioCommand {
     /// Play a segmented message with element-level completion tracking
     /// Each segment will emit a UserSegmentComplete event when finished
     PlayUserMessageSegmented {
+        id: MessageId,
         segments: Vec<MessageSegment>,
         wpm: u8,
     },
@@ -56,16 +62,16 @@ pub enum AudioCommand {
     UpdateSettings(AudioSettings),
     /// Stop all audio (except noise)
     StopAll,
+    /// Stop the user's transmission only; stations keep sending
+    StopUser,
 }
 
 /// Messages from Audio thread to UI thread
 #[derive(Clone, Debug)]
 pub enum AudioEvent {
-    /// Station finished sending its message
-    StationComplete(StationId),
-    /// User message finished playing
-    UserMessageComplete,
+    /// User message finished playing (not emitted for a message that was stopped)
+    UserMessageComplete(MessageId),
     /// A segment of the user message finished playing
     /// Emitted for each segment in a segmented message before UserMessageComplete
-    UserSegmentComplete(MessageSegmentType),
+    UserSegmentComplete(MessageId, MessageSegmentType),
 }

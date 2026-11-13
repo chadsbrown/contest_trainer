@@ -177,6 +177,10 @@ pub fn render_settings_panel(
                             )
                             .fixed_decimals(2),
                         )
+                        .on_hover_text(
+                            "How busy the band is: higher values bring new stations to \
+                             your frequency more often. Low values leave some CQs unanswered.",
+                        )
                         .changed()
                     {
                         *settings_changed = true;
