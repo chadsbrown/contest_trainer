@@ -48,6 +48,15 @@ fn ordered<T: PartialOrd>(a: T, b: T) -> (T, T) {
     }
 }
 
+/// Sets how quickly stations find the frequency: on average one arrives every
+/// `ARRIVAL_PACE_SECS / (station_probability * max_simultaneous_stations)` seconds.
+const ARRIVAL_PACE_SECS: f32 = 6.0;
+
+/// Longest stretch of time credited with arrivals at once. Stations find a
+/// frequency because someone is transmitting on it, so a long silence does
+/// not build up a crowd.
+const MAX_ARRIVAL_WINDOW: Duration = Duration::from_secs(10);
+
 /// State of a caller in the persistent queue
 #[derive(Clone, Debug, PartialEq)]
 pub enum CallerState {
@@ -124,8 +133,8 @@ pub struct CallerManager {
     /// Callers currently active (subset of queue that's calling)
     active_ids: Vec<StationId>,
 
-    /// Last time we tried to add callers to the queue
-    last_replenish: Instant,
+    /// When arrivals on frequency were last accounted for
+    last_arrival_check: Instant,
 }
 
 impl CallerManager {
@@ -139,7 +148,7 @@ impl CallerManager {
             serial_counter: 1,
             queue: Vec::new(),
             active_ids: Vec::new(),
-            last_replenish: Instant::now(),
+            last_arrival_check: Instant::now(),
         }
     }
 
@@ -157,46 +166,75 @@ impl CallerManager {
         self.active_ids.clear();
     }
 
-    /// Add new callers to the queue (call periodically to simulate stations finding frequency)
-    fn replenish_queue(
+    /// Stations per second finding the frequency
+    fn arrival_rate(&self) -> f32 {
+        self.settings.station_probability.clamp(0.0, 1.0)
+            * self.settings.max_simultaneous_stations as f32
+            / ARRIVAL_PACE_SECS
+    }
+
+    /// The most callers the queue holds; arrivals beyond this move on
+    fn queue_capacity(&self) -> usize {
+        (self.settings.max_simultaneous_stations as f32 * 2.5).ceil() as usize
+    }
+
+    /// Account for stations that found the frequency since the last check
+    fn update_arrivals(
         &mut self,
         contest: &dyn Contest,
         contest_settings: &toml::Value,
         user_callsign: Option<&str>,
         cty: Option<&CtyDat>,
     ) {
-        let mut rng = rand::rng();
+        let now = Instant::now();
+        let elapsed = now
+            .duration_since(self.last_arrival_check)
+            .min(MAX_ARRIVAL_WINDOW);
+        self.last_arrival_check = now;
+        self.stations_arrive(elapsed, contest, contest_settings, user_callsign, cty);
+    }
 
-        // Don't replenish too often
-        if self.last_replenish.elapsed().as_millis() < 500 {
+    /// Add the stations that arrive on frequency over `elapsed`.
+    ///
+    /// Arrivals are random in time (a Poisson process at `arrival_rate`), so
+    /// how many turn up depends on how long it has been - not on how often
+    /// this is called.
+    fn stations_arrive(
+        &mut self,
+        elapsed: Duration,
+        contest: &dyn Contest,
+        contest_settings: &toml::Value,
+        user_callsign: Option<&str>,
+        cty: Option<&CtyDat>,
+    ) {
+        let rate = self.arrival_rate();
+        if rate <= 0.0 {
             return;
         }
-        self.last_replenish = Instant::now();
+        let mut rng = rand::rng();
+        let window = elapsed.as_secs_f32();
+        let capacity = self.queue_capacity();
 
-        // Target queue size based on the maximum simultaneous stations
-        let target_queue_size =
-            (self.settings.max_simultaneous_stations as f32 * 2.5).ceil() as usize;
-
-        // Count active callers (not given up, not worked)
-        let mut active_in_queue = self
+        // Callers still on frequency (not given up, not worked)
+        let mut present = self
             .queue
             .iter()
             .filter(|c| c.state != CallerState::GaveUp && c.state != CallerState::Worked)
             .count();
 
-        // Add callers if below target
-        while active_in_queue < target_queue_size {
-            // Probability check for adding each caller
-            if rng.random::<f32>() > self.settings.station_probability {
+        // Walk forward through exponentially distributed gaps between arrivals
+        let mut at = 0.0_f32;
+        while present < capacity {
+            at += -(1.0 - rng.random::<f32>()).ln() / rate;
+            if at > window {
                 break;
             }
-
-            if let Some(caller) = self.create_caller(contest, contest_settings, user_callsign, cty)
-            {
-                self.queue.push(caller);
-                active_in_queue += 1;
-            } else {
-                break;
+            match self.create_caller(contest, contest_settings, user_callsign, cty) {
+                Some(caller) => {
+                    self.queue.push(caller);
+                    present += 1;
+                }
+                None => break,
             }
         }
     }
@@ -296,8 +334,9 @@ impl CallerManager {
         })
     }
 
-    /// Called when CQ completes - select callers to respond
-    /// Returns list of callers that will call (as StationParams for audio)
+    /// Called once when a CQ completes - select callers to respond
+    /// Returns list of callers that will call (as StationParams for audio).
+    /// An empty list means the CQ went unanswered.
     pub fn on_cq_complete(
         &mut self,
         contest: &dyn Contest,
@@ -307,8 +346,8 @@ impl CallerManager {
     ) -> Vec<StationParams> {
         let mut rng = rand::rng();
 
-        // First, replenish the queue
-        self.replenish_queue(contest, contest_settings, user_callsign, cty);
+        // First, see who has found the frequency
+        self.update_arrivals(contest, contest_settings, user_callsign, cty);
 
         // Clean up worked/given-up callers
         self.queue
@@ -335,12 +374,12 @@ impl CallerManager {
                 break;
             }
 
-            // Only consider waiting callers
-            if caller.state != CallerState::Waiting {
+            // Only consider waiting callers whose retry delay has passed
+            if !caller.is_ready_to_call() {
                 continue;
             }
 
-            // Probability check - more persistent callers are more likely to call
+            // Each caller decides once per CQ - more persistent callers are more likely to call
             let call_probability = 0.5 + (caller.patience as f32 - 1.0) * 0.1;
             if rng.random::<f32>() > call_probability {
                 continue;
@@ -383,9 +422,11 @@ impl CallerManager {
         self.active_ids.retain(|id| *id != station_id);
     }
 
-    /// Try to spawn tail-enders after QSO completion
-    /// Returns list of tail-enders that will call (uses geometric decay for multiple callers)
-    pub fn try_spawn_tail_ender(
+    /// Called when a TU completes. A TU is as good as a CQ to anyone listening:
+    /// callers who lost out in the pileup call again, and stations that have
+    /// not called yet may tail-end.
+    /// Returns list of callers that will call (as StationParams for audio)
+    pub fn on_tu_complete(
         &mut self,
         contest: &dyn Contest,
         contest_settings: &toml::Value,
@@ -394,8 +435,21 @@ impl CallerManager {
     ) -> Vec<StationParams> {
         let mut rng = rand::rng();
 
-        // Replenish queue first
-        self.replenish_queue(contest, contest_settings, user_callsign, cty);
+        self.update_arrivals(contest, contest_settings, user_callsign, cty);
+
+        // Callers who were not picked hear the TU as their cue to try again,
+        // unless they have run out of patience.
+        let now = Instant::now();
+        for caller in &mut self.queue {
+            if caller.state == CallerState::Calling {
+                if caller.has_given_up() {
+                    caller.state = CallerState::GaveUp;
+                } else {
+                    caller.state = CallerState::Waiting;
+                    caller.ready_at = now;
+                }
+            }
+        }
 
         // Clean up worked/given-up callers
         self.queue
@@ -404,18 +458,21 @@ impl CallerManager {
         // Clear active list for new potential callers
         self.active_ids.clear();
 
-        // Select tail-enders (up to max_simultaneous) with geometric decay
         let mut responding: Vec<StationParams> = Vec::new();
         let max_callers = self.settings.max_simultaneous_stations as usize;
         let decay_factor: f32 = 0.5;
 
-        // Sort by reaction time with a stable random jitter
+        // Returning callers are already keyed up, so they get in first; within
+        // each group, order by reaction time with a random jitter.
         let mut jitter: HashMap<StationId, u32> = HashMap::new();
         for caller in &self.queue {
             jitter.insert(caller.params.id, rng.random_range(0..100));
         }
         self.queue.sort_by_key(|c| {
-            c.params.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0)
+            (
+                c.attempts == 0,
+                c.params.reaction_delay_ms + jitter.get(&c.params.id).copied().unwrap_or(0),
+            )
         });
 
         for caller in &mut self.queue {
@@ -423,19 +480,22 @@ impl CallerManager {
                 break;
             }
 
-            // Only consider waiting callers that are ready
-            if caller.state != CallerState::Waiting || !caller.is_ready_to_call() {
+            if !caller.is_ready_to_call() {
                 continue;
             }
 
-            // Geometric decay: base_probability * 0.5^slot
             let base_probability = 0.5 + (caller.patience as f32 - 1.0) * 0.1;
-            let slot_probability = base_probability * decay_factor.powi(responding.len() as i32);
-            if rng.random::<f32>() > slot_probability {
+            let probability = if caller.attempts > 0 {
+                // Already trying to get through: responds as to a CQ
+                base_probability
+            } else {
+                // Tail-ender: geometric decay, base_probability * 0.5^slot
+                base_probability * decay_factor.powi(responding.len() as i32)
+            };
+            if rng.random::<f32>() > probability {
                 continue;
             }
 
-            // This caller will tail-end
             caller.mark_calling();
             caller.record_attempt();
             self.active_ids.push(caller.params.id);
@@ -473,28 +533,176 @@ mod tests {
         }
     }
 
+    const LONG_TIME: Duration = Duration::from_secs(3600);
+
+    /// Manager whose callers always answer (patience 6 gives call probability 1.0)
+    fn eager_manager(max_stations: u8, callsigns: usize) -> CallerManager {
+        CallerManager::new(
+            Box::new(FiniteCallsignSource {
+                remaining: callsigns,
+            }),
+            SimulationSettings {
+                max_simultaneous_stations: max_stations,
+                station_probability: 1.0,
+                pileup: PileupSettings {
+                    min_patience: 6,
+                    max_patience: 6,
+                    ..PileupSettings::default()
+                },
+                ..SimulationSettings::default()
+            },
+        )
+    }
+
+    /// Stop anyone new turning up, so only the callers already present matter
+    fn close_the_band(manager: &mut CallerManager) {
+        let mut settings = manager.settings.clone();
+        settings.station_probability = 0.0;
+        manager.update_settings(settings);
+    }
+
     #[test]
-    fn replenish_queue_stops_at_target_at_full_probability() {
+    fn arrivals_stop_at_queue_capacity() {
         let contest = crate::contest::cqww::make_contest();
         let contest_settings = contest.default_settings();
 
-        for (max_stations, target) in [(1, 3), (2, 5), (5, 13)] {
-            let mut manager = CallerManager::new(
-                Box::new(FiniteCallsignSource {
-                    remaining: target + 1,
-                }),
-                SimulationSettings {
-                    max_simultaneous_stations: max_stations,
-                    station_probability: 1.0,
-                    ..SimulationSettings::default()
-                },
-            );
-            manager.last_replenish = Instant::now() - Duration::from_millis(500);
+        for (max_stations, capacity) in [(1, 3), (2, 5), (5, 13)] {
+            let mut manager = eager_manager(max_stations, capacity + 1);
 
-            manager.replenish_queue(contest.as_ref(), &contest_settings, None, None);
+            manager.stations_arrive(LONG_TIME, contest.as_ref(), &contest_settings, None, None);
 
-            assert_eq!(manager.queue.len(), target, "max_stations={max_stations}");
+            assert_eq!(manager.queue.len(), capacity, "max_stations={max_stations}");
         }
+    }
+
+    #[test]
+    fn nobody_arrives_in_no_time_or_on_a_dead_band() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+
+        let mut manager = eager_manager(2, 10);
+        manager.stations_arrive(
+            Duration::ZERO,
+            contest.as_ref(),
+            &contest_settings,
+            None,
+            None,
+        );
+        assert!(manager.queue.is_empty());
+
+        close_the_band(&mut manager);
+        manager.stations_arrive(LONG_TIME, contest.as_ref(), &contest_settings, None, None);
+        assert!(manager.queue.is_empty());
+    }
+
+    #[test]
+    fn arrivals_depend_on_elapsed_time_not_on_how_often_we_check() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+        let trials = 300;
+
+        // The same 3 seconds, checked once or in 60 slices (as a frame loop would)
+        let mut total = [0usize; 2];
+        for (which, slices) in [1u32, 60].into_iter().enumerate() {
+            for _ in 0..trials {
+                let mut manager = eager_manager(5, 100);
+                for _ in 0..slices {
+                    manager.stations_arrive(
+                        Duration::from_secs(3) / slices,
+                        contest.as_ref(),
+                        &contest_settings,
+                        None,
+                        None,
+                    );
+                }
+                total[which] += manager.queue.len();
+            }
+        }
+
+        // Rate is 5/6 per second, so about 2.5 arrivals either way
+        for sum in total {
+            let mean = sum as f32 / trials as f32;
+            assert!((2.1..2.9).contains(&mean), "mean arrivals {mean}");
+        }
+    }
+
+    #[test]
+    fn pileup_loser_calls_again_after_tu() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+        let mut manager = eager_manager(2, 100);
+        manager.stations_arrive(LONG_TIME, contest.as_ref(), &contest_settings, None, None);
+        close_the_band(&mut manager);
+
+        let pileup = manager.on_cq_complete(contest.as_ref(), &contest_settings, None, None);
+        assert_eq!(pileup.len(), 2);
+
+        // Work one of them; the other must come straight back after the TU
+        manager.on_qso_complete(pileup[0].id);
+        let after_tu = manager.on_tu_complete(contest.as_ref(), &contest_settings, None, None);
+        assert!(
+            after_tu.iter().any(|p| p.id == pileup[1].id),
+            "the caller who lost the pileup should call again"
+        );
+        assert!(after_tu.iter().all(|p| p.id != pileup[0].id));
+    }
+
+    #[test]
+    fn caller_out_of_patience_leaves_after_tu() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+        let mut manager = eager_manager(2, 100);
+        manager.stations_arrive(LONG_TIME, contest.as_ref(), &contest_settings, None, None);
+        close_the_band(&mut manager);
+
+        let pileup = manager.on_cq_complete(contest.as_ref(), &contest_settings, None, None);
+        let loser = pileup[1].id;
+        for caller in &mut manager.queue {
+            if caller.params.id == loser {
+                caller.patience = 1;
+            }
+        }
+
+        manager.on_qso_complete(pileup[0].id);
+        let after_tu = manager.on_tu_complete(contest.as_ref(), &contest_settings, None, None);
+        assert!(after_tu.iter().all(|p| p.id != loser));
+        assert!(manager.queue.iter().all(|c| c.params.id != loser));
+    }
+
+    #[test]
+    fn arrivals_count_existing_callers_and_replace_finished_callers() {
+        let contest = crate::contest::cqww::make_contest();
+        let contest_settings = contest.default_settings();
+        let mut manager = eager_manager(2, 10);
+        for state in [
+            CallerState::Waiting,
+            CallerState::Calling,
+            CallerState::Worked,
+            CallerState::GaveUp,
+        ] {
+            let mut caller = manager
+                .create_caller(contest.as_ref(), &contest_settings, None, None)
+                .unwrap();
+            caller.state = state;
+            manager.queue.push(caller);
+        }
+
+        manager.stations_arrive(LONG_TIME, contest.as_ref(), &contest_settings, None, None);
+
+        // Two existing viable callers plus three new ones, and two finished callers.
+        assert_eq!(manager.queue.len(), 7);
+        assert_eq!(
+            manager
+                .queue
+                .iter()
+                .filter(|c| c.state == CallerState::Waiting || c.state == CallerState::Calling)
+                .count(),
+            5
+        );
+
+        // A full queue must stay unchanged however long we wait.
+        manager.stations_arrive(LONG_TIME, contest.as_ref(), &contest_settings, None, None);
+        assert_eq!(manager.queue.len(), 7);
     }
 
     #[test]
@@ -521,51 +729,6 @@ mod tests {
         assert_eq!(caller.params.amplitude, 0.8);
         assert_eq!(caller.params.frequency_offset_hz, 0.0);
         assert!((28..=36).contains(&caller.params.wpm));
-    }
-
-    #[test]
-    fn replenish_queue_counts_existing_callers_and_replaces_finished_callers() {
-        let contest = crate::contest::cqww::make_contest();
-        let contest_settings = contest.default_settings();
-        let mut manager = CallerManager::new(
-            Box::new(FiniteCallsignSource { remaining: 10 }),
-            SimulationSettings {
-                max_simultaneous_stations: 2,
-                station_probability: 1.0,
-                ..SimulationSettings::default()
-            },
-        );
-        for state in [
-            CallerState::Waiting,
-            CallerState::Calling,
-            CallerState::Worked,
-            CallerState::GaveUp,
-        ] {
-            let mut caller = manager
-                .create_caller(contest.as_ref(), &contest_settings, None, None)
-                .unwrap();
-            caller.state = state;
-            manager.queue.push(caller);
-        }
-
-        manager.last_replenish = Instant::now() - Duration::from_millis(500);
-        manager.replenish_queue(contest.as_ref(), &contest_settings, None, None);
-
-        // Two existing viable callers plus three new ones, and two finished callers.
-        assert_eq!(manager.queue.len(), 7);
-        assert_eq!(
-            manager
-                .queue
-                .iter()
-                .filter(|c| c.state == CallerState::Waiting || c.state == CallerState::Calling)
-                .count(),
-            5
-        );
-
-        // A full queue must stay unchanged on the next eligible refill.
-        manager.last_replenish = Instant::now() - Duration::from_millis(500);
-        manager.replenish_queue(contest.as_ref(), &contest_settings, None, None);
-        assert_eq!(manager.queue.len(), 7);
     }
 
     #[test]

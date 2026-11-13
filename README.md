@@ -34,7 +34,7 @@ A practice tool for amateur radio CW (Morse code) contest operators. Simulate re
 - **Realistic Audio Simulation**: Hear CW signals with configurable speed, pitch, and signal strength variations
 - **Multiple Simultaneous Callers**: User-configurable number of callers
 - **Background Noise**: Adjustable noise level to simulate real band conditions
-- **Tail-Ender Support**: Stations may call immediately after a QSO without waiting for your next CQ (or not)
+- **Tail-Ender Support**: After your TU, stations that lost out in the pileup call again and new ones may tail-end, without waiting for your next CQ (or not)
 - **Partial Call Queries**: Use F5 to query a partial callsign when you can't copy the full call
 - **Score Tracking**: Track QSOs, points, and hourly rate
 - **Session Statistics**: Detailed performance analysis including accuracy rates, WPM statistics, and character-level error tracking
@@ -93,7 +93,7 @@ Access settings via File > Settings. The settings window opens as a separate win
 ### Simulation Settings
 
 - **Max Simultaneous Stations**: How many stations can call at once (1-5)
-- **Station Probability**: Likelihood of stations calling after your CQ
+- **Station Probability**: How busy the band is - how often new stations find your frequency. Low values leave some CQs unanswered
 - **WPM Range**: Speed range for calling stations
 - **Filter Width**: Total spread between calling stations (Hz). Offsets are ± half the width. Default 300 Hz (min 100, max 500).
 - **Signal Strength Range**: Volume variation between stations

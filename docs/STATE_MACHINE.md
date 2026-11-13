@@ -161,7 +161,7 @@ This is implemented in `CallerResponse::from_progress()`.
 |-------|-------------|
 | `Idle` | Waiting for user to start |
 | `CallingCq` | User is sending CQ message |
-| `WaitingForCallers` | CQ finished, 300ms delay before stations respond |
+| `WaitingForCallers` | CQ finished, 200ms delay before stations respond (or nobody does: back to `Idle`) |
 | `StationsCalling` | One or more stations have sent/are sending callsigns |
 | `UserTransmitting { tx_type }` | User is transmitting (type specifies what) |
 | `WaitingForStation` | Brief pause (250ms) before station responds |
@@ -476,10 +476,18 @@ Note: `reaction_delay_ms` (100-800ms) is stored in `StationParams` and applied a
 - `Worked` - Successfully completed QSO
 
 ### Key Methods
-- `on_cq_complete()` - Select callers to respond to CQ
+- `on_cq_complete()` - Select callers to respond to CQ (called once per CQ; may be nobody)
 - `on_cq_restart()` - Handle F1 during active callers (increment attempts, set retry delay)
 - `on_qso_complete(id)` - Mark caller as worked
-- `try_spawn_tail_ender()` - Attempt to spawn a tail-ender after QSO
+- `on_tu_complete()` - After a TU: pileup losers call again, new stations may tail-end
+
+### Arrivals
+
+Stations find the frequency at random times (a Poisson process) at a rate of `station_probability * max_simultaneous_stations / 6` per second. Arrivals are added whenever a CQ or TU completes, for the time elapsed since the last check (capped at 10 seconds), up to a queue capacity of `ceil(max_simultaneous_stations * 2.5)`. Because the number depends on elapsed time rather than on how often the queue is checked, a quiet band produces unanswered CQs: the state goes back to `Idle` and the user calls again.
+
+### After a TU
+
+A TU is as good as a CQ to anyone listening. Callers left in `Calling` (they lost the pileup) return to `Waiting` and respond with their normal call probability, ahead of stations that have not called yet. Those tail-end with geometric decay (`call_probability * 0.5^slot`).
 
 ### Caller Selection and Retry Probability
 
