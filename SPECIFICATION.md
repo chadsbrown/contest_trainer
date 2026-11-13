@@ -185,7 +185,8 @@ WaitingForTailEnder -[100ms]-> StationsCalling
 |------|---------|-----|
 | Idle | F1 or Enter (empty) | CallingCq |
 | CallingCq | User message complete | WaitingForCallers |
-| WaitingForCallers | 300ms elapsed + callers spawn | StationsCalling |
+| WaitingForCallers | 200ms elapsed, callers respond | StationsCalling |
+| WaitingForCallers | 200ms elapsed, nobody responds | Idle |
 | StationsCalling | Enter (with callsign) | UserTransmitting{Exchange} |
 | StationsCalling | F5 | UserTransmitting{CallsignOnly} |
 | StationsCalling | F2 | UserTransmitting{ExchangeOnly} |
@@ -670,21 +671,26 @@ Callers persist across CQ cycles. Each caller has:
 | wpm | u8 | random(wpm_min..=wpm_max), default 28-36 |
 | amplitude | f32 | random(amplitude_min..amplitude_max), default 0.4..1.0 |
 
-### 8.3 Queue Replenishment
+### 8.3 Arrivals on Frequency
 
-- **Rate limiting**: Maximum once per 500ms.
-- **Target queue size**: `ceil(max_simultaneous_stations * 2.5)` (default: 5).
-- **Probability gate**: Each new caller addition rolls against `station_probability` (default 0.7); on failure, stops adding.
-- **Country filtering**: Up to 10 retries per caller. If `same_country_filter_enabled`, callers from the user's country are rejected with probability `(1.0 - same_country_probability)`.
+Stations find the frequency at random times (a Poisson process), independent of how often the queue is checked.
+
+- **Rate**: `station_probability * max_simultaneous_stations / 6` stations per second (default 0.7 x 2 / 6: one about every 4.3 seconds).
+- **Accounting**: arrivals are added when a CQ or TU completes, for the time elapsed since the last check, capped at 10 seconds so that a long silence does not build up a crowd.
+- **Queue capacity**: `ceil(max_simultaneous_stations * 2.5)` (default: 5). Arrivals beyond it move on.
+- **Country filtering**: If `same_country_filter_enabled`, `same_country_probability` is the fraction of callers from the user's country.
 
 ### 8.4 CQ Response Selection (on_cq_complete)
 
-1. Remove all Worked and GaveUp callers.
+Called once per CQ, 200ms after it ends.
+
+1. Add arrivals; remove all Worked and GaveUp callers.
 2. Sort remaining by `reaction_delay_ms + random_jitter(0..100)`.
 3. For each caller up to `max_simultaneous_stations`:
-   - Must be in Waiting state.
+   - Must be in Waiting state with any retry delay elapsed.
    - **Call probability**: `0.5 + (patience - 1) * 0.1` (patience 2 = 60%, patience 5 = 90%).
    - On success: mark as Calling, record attempt, add to active list.
+4. If nobody responds the CQ is unanswered: the state returns to Idle and the user calls again.
 
 ### 8.5 CQ Restart (on_cq_restart)
 
@@ -693,16 +699,18 @@ When user presses F1 without completing a QSO:
 - Others -> set retry delay (random 200-1200ms), state back to Waiting.
 - Clear active list.
 
-### 8.6 Tail-Ender Spawning (try_spawn_tail_ender)
+### 8.6 After a TU (on_tu_complete)
 
-1. Replenish queue, remove Worked/GaveUp.
-2. Sort waiting callers by reaction delay with random jitter (same as CQ).
-3. Loop up to `max_simultaneous_stations`, selecting waiting+ready callers.
-4. **Geometric decay per slot**: `base_probability * 0.5^slot` where:
-   - `base_probability = 0.5 + (patience - 1) * 0.1` (same formula as CQ, 60-90%)
-   - `slot` = 0-indexed count of callers already selected
-   - Decay factor `0.5` is hardcoded (no config setting)
-5. Expected outcome: ~60-90% chance of 1 tail-ender, ~30-45% for 2, ~15% for 3, rare beyond that.
+A TU is as good as a CQ to anyone listening.
+
+1. Add arrivals.
+2. Callers still in Calling state (pileup losers, or a caller abandoned mid-QSO) go back to Waiting, ready immediately - or to GaveUp if they have exceeded patience.
+3. Remove Worked/GaveUp.
+4. Order returning callers (attempts > 0) first, then stations that have not called yet; within each group by reaction delay with random jitter.
+5. Loop up to `max_simultaneous_stations`, with `base_probability = 0.5 + (patience - 1) * 0.1`:
+   - **Returning callers** respond with `base_probability`, as to a CQ.
+   - **Tail-enders** (not called yet) respond with `base_probability * 0.5^slot`, where `slot` is the number of callers already selected. Decay factor `0.5` is hardcoded.
+6. If nobody calls, the state returns to Idle.
 
 ---
 
@@ -1310,7 +1318,7 @@ All files: lines starting with `#` or `!` are comments; empty lines skipped; val
 | Tail-ender delay | 100ms | Before tail-ender starts calling |
 | Caller retry delay | 200-1200ms | Before persistent caller tries again |
 | Caller reaction time | 100-800ms | How fast a caller responds to CQ |
-| Queue replenish cooldown | 500ms | Minimum time between queue replenishments |
+| Arrival window cap | 10s | Longest stretch credited with new arrivals at once |
 | Morse ramp time | 5ms | Raised cosine keying envelope rise/fall |
 
 ---

@@ -951,13 +951,13 @@ impl ContestApp {
         }
     }
 
-    /// Try to spawn tail-enders after TU
+    /// TU finished: pileup leftovers and tail-enders may call straight away
     fn try_spawn_tail_ender(&mut self) {
         let contest_settings = self
             .settings
             .contest
             .settings_for_mut(self.contest.as_ref());
-        let responding = self.caller_manager.try_spawn_tail_ender(
+        let responding = self.caller_manager.on_tu_complete(
             self.contest.as_ref(),
             contest_settings,
             Some(&self.settings.user.callsign),
@@ -1139,11 +1139,12 @@ impl ContestApp {
 
         // Wait a bit after CQ before callers respond
         // (callers also have individual reaction_delay_ms applied in audio)
-        if let Some(finished) = self.last_cq_finished {
-            if finished.elapsed().as_millis() < 200 {
-                return;
-            }
+        match self.last_cq_finished {
+            Some(finished) if finished.elapsed().as_millis() >= 200 => {}
+            _ => return,
         }
+        // Everyone listening decides once per CQ
+        self.last_cq_finished = None;
 
         // Get callers from the persistent queue
         let contest_settings = self
@@ -1157,18 +1158,22 @@ impl ContestApp {
             Some(&self.cty),
         );
 
-        if !responding.is_empty() {
-            let callers: Vec<ActiveCaller> = responding
-                .into_iter()
-                .map(|params| {
-                    let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
-                    ActiveCaller { params }
-                })
-                .collect();
-
-            self.context.set_callers(callers);
-            self.state = ContestState::StationsCalling;
+        if responding.is_empty() {
+            // Nobody came back: it is up to the user to call again
+            self.state = ContestState::Idle;
+            return;
         }
+
+        let callers: Vec<ActiveCaller> = responding
+            .into_iter()
+            .map(|params| {
+                let _ = self.cmd_tx.send(AudioCommand::StartStation(params.clone()));
+                ActiveCaller { params }
+            })
+            .collect();
+
+        self.context.set_callers(callers);
+        self.state = ContestState::StationsCalling;
     }
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
@@ -1798,6 +1803,24 @@ mod tests {
 
         h.finish_user_tx();
         assert_eq!(h.app.state, ContestState::WaitingForCallers);
+    }
+
+    #[test]
+    fn unanswered_cq_returns_to_idle() {
+        let mut h = harness();
+        h.app.send_cq();
+        h.finish_user_tx();
+        assert_eq!(h.app.state, ContestState::WaitingForCallers);
+
+        // Too soon for anyone to have come back
+        h.app.maybe_spawn_callers();
+        assert_eq!(h.app.state, ContestState::WaitingForCallers);
+
+        // Nobody is on frequency: the CQ goes unanswered
+        h.app.last_cq_finished = Some(Instant::now() - std::time::Duration::from_millis(250));
+        h.app.maybe_spawn_callers();
+        assert_eq!(h.app.state, ContestState::Idle);
+        assert!(h.station_messages().is_empty());
     }
 
     #[test]

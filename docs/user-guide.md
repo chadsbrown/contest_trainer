@@ -125,7 +125,7 @@ These fields are defined by the selected contest and can vary by contest type.
 - **Values**: 1-5
 
 ### Station Probability
-- **Purpose**: Probability that a station will respond after your CQ
+- **Purpose**: How busy the band is. Higher values bring new stations to your frequency more often (on average one every `6 / (Station Probability x Max Simultaneous Stations)` seconds while you are operating). At low values some CQs go unanswered and you have to call again.
 - **Default**: `0.7` (70%)
 - **Values**: 0.1-1.0
 
